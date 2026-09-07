@@ -17,4 +17,7 @@ test("painel financeiro possui os fluxos essenciais", async () => {
   assert.match(page, />✎<\/button>/);
   assert.match(page, />🗑<\/button>/);
   assert.match(page, /method: "PATCH"/);
+  assert.match(page, /Filtrar por categoria/);
+  assert.match(page, /Todas as categorias/);
+  assert.match(page, /filteredExpenses/);
 });

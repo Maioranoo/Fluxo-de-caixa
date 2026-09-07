@@ -24,6 +24,7 @@ export default function Home() {
   const [notice, setNotice] = useState("");
   const [form, setForm] = useState({ amount: "", description: "", categoryId: "", paymentMethod: "pix", person: "João", occurredAt: today() });
   const [categoryName, setCategoryName] = useState("");
+  const [expenseCategory, setExpenseCategory] = useState("all");
   const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
   const [editingCategoryName, setEditingCategoryName] = useState("");
 
@@ -41,6 +42,8 @@ export default function Home() {
   const byPayment = useMemo(() => groupTotals(data.expenses, item => item.paymentMethod.startsWith("cartao") ? "cartao" : item.paymentMethod), [data]);
   const joao = data.expenses.filter(x => x.paymentMethod === "cartao_joao").reduce((s, x) => s + x.amountCents, 0);
   const dena = data.expenses.filter(x => x.paymentMethod === "cartao_dena").reduce((s, x) => s + x.amountCents, 0);
+  const filteredExpenses = useMemo(() => expenseCategory === "all" ? data.expenses : data.expenses.filter(item => String(item.categoryId) === expenseCategory), [data.expenses, expenseCategory]);
+  const filteredTotal = useMemo(() => filteredExpenses.reduce((sum, item) => sum + item.amountCents, 0), [filteredExpenses]);
 
   async function addExpense(event: React.FormEvent) {
     event.preventDefault();
@@ -109,7 +112,7 @@ export default function Home() {
           <label>Data<input type="date" value={form.occurredAt} onChange={e => setForm({...form, occurredAt:e.target.value})} required /></label>
           <button className="primary wide" type="submit">Salvar gasto</button>
         </form></Panel></section>}
-        {tab === "gastos" && <section><ExpenseTable expenses={data.expenses} onDelete={removeExpense}/></section>}
+        {tab === "gastos" && <section><div className="expense-filter"><label>Filtrar por categoria<select value={expenseCategory} onChange={e=>setExpenseCategory(e.target.value)}><option value="all">Todas as categorias</option>{data.categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><div><span>{filteredExpenses.length} gasto{filteredExpenses.length === 1 ? "" : "s"} no mês</span><strong>{money(filteredTotal)}</strong></div></div><ExpenseTable expenses={filteredExpenses} onDelete={removeExpense}/></section>}
         {tab === "categorias" && <section className="narrow"><Panel title="Categorias"><form className="category-form" onSubmit={addCategory}><input placeholder="Nova categoria" value={categoryName} onChange={e=>setCategoryName(e.target.value)} required/><button className="primary">Adicionar</button></form><div className="category-list">{data.categories.map(c=>editingCategoryId === c.id ? <form className="category-edit" key={c.id} onSubmit={editCategory}><input autoFocus value={editingCategoryName} onChange={e=>setEditingCategoryName(e.target.value)} required aria-label={`Novo nome de ${c.name}`}/><button className="primary" type="submit">Salvar</button><button className="secondary" type="button" onClick={()=>setEditingCategoryId(null)}>Cancelar</button></form> : <div className="category-item" key={c.id}><span>{c.name.slice(0,1).toUpperCase()}</span><b>{c.name}</b><div className="category-actions"><button className="icon-button edit-icon" type="button" aria-label={`Editar ${c.name}`} title="Editar" onClick={()=>{setEditingCategoryId(c.id);setEditingCategoryName(c.name)}}>✎</button><button className="icon-button delete-icon" type="button" aria-label={`Excluir ${c.name}`} title="Excluir" onClick={()=>removeCategory(c.id,c.name)}>🗑</button></div></div>)}{!data.categories.length&&<Empty text="Nenhuma categoria criada."/>}</div></Panel></section>}
         {tab === "relatorio" && <section className="print-area"><div className="report-head"><div><p>FATURA MENSAL</p><h2>{monthLabel}</h2></div><button className="primary no-print" onClick={()=>window.print()}>Imprimir / salvar PDF</button></div><ExpenseTable expenses={data.expenses} onDelete={removeExpense} readonly/><div className="report-total"><span>Total da fatura</span><strong>{money(total)}</strong></div></section>}
       </>}
