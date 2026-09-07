@@ -22,10 +22,18 @@ export async function POST(request: Request) {
     try { const [category] = await db.insert(categories).values({name}).returning(); return Response.json({category},{status:201}); }
     catch { return Response.json({error:"Essa categoria já existe."},{status:409}); }
   }
-  const amountCents = parseMoney(body.amount); const categoryId = Number(body.categoryId);
-  if (!amountCents || !body.description?.trim() || !categoryId || !body.occurredAt || !body.paymentMethod || !["João","Dena"].includes(body.person)) return Response.json({error:"Preencha todos os campos corretamente."},{status:400});
-  const [expense] = await db.insert(expenses).values({amountCents,description:body.description.trim(),categoryId,paymentMethod:body.paymentMethod,person:body.person,occurredAt:body.occurredAt}).returning();
-  return Response.json({expense},{status:201});
+  const amountCents = parseMoney(body.amount), categoryId = Number(body.categoryId);
+  const paymentMethods = ["cartao_joao","cartao_dena","pix","boleto","caju"], isCard = body.paymentMethod === "cartao_joao" || body.paymentMethod === "cartao_dena";
+  const installmentCount = isCard ? Number(body.installments ?? "1") : 1;
+  if (!amountCents || !body.description?.trim() || !categoryId || !body.occurredAt || !paymentMethods.includes(body.paymentMethod) || !["João","Dena"].includes(body.person) || !Number.isInteger(installmentCount) || installmentCount < 1 || installmentCount > 60 || installmentCount > amountCents) return Response.json({error:"Preencha todos os campos corretamente."},{status:400});
+  const baseAmount = Math.floor(amountCents / installmentCount), remainder = amountCents % installmentCount;
+  const rows = Array.from({length:installmentCount},(_,index)=>({
+    amountCents:baseAmount + (index < remainder ? 1 : 0),
+    description:installmentCount > 1 ? `${body.description.trim()} (${index + 1}/${installmentCount})` : body.description.trim(),
+    categoryId,paymentMethod:body.paymentMethod,person:body.person,occurredAt:addMonths(body.occurredAt,index)
+  }));
+  const createdExpenses = await db.insert(expenses).values(rows).returning();
+  return Response.json({expenses:createdExpenses,installments:installmentCount},{status:201});
 }
 
 export async function PATCH(request: Request) {
@@ -51,3 +59,4 @@ export async function DELETE(request: Request) {
 
 function parseMoney(value="") { const cleaned=value.replace(/R\$\s?/i,"").trim(); const normalized=cleaned.includes(",")?cleaned.replace(/\./g,"").replace(",","."):cleaned; const n=Number(normalized); return Number.isFinite(n)&&n>0?Math.round(n*100):null; }
 function nextMonth(month:string) { const [year,m]=month.split("-").map(Number); const d=new Date(year,m,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-01`; }
+function addMonths(date:string,offset:number) { const [year,month,day]=date.split("-").map(Number); const first=new Date(Date.UTC(year,month-1+offset,1)); const lastDay=new Date(Date.UTC(first.getUTCFullYear(),first.getUTCMonth()+1,0)).getUTCDate(); return `${first.getUTCFullYear()}-${String(first.getUTCMonth()+1).padStart(2,"0")}-${String(Math.min(day,lastDay)).padStart(2,"0")}`; }

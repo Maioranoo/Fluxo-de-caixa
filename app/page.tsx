@@ -8,13 +8,14 @@ type Data = { categories: Category[]; expenses: Expense[] };
 
 const payments = [
   ["cartao_joao", "Cartão João"], ["cartao_dena", "Cartão Dena"], ["pix", "Pix"],
-  ["boleto", "Boleto"]
+  ["boleto", "Boleto"], ["caju", "Caju"]
 ];
 
 const money = (cents: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cents / 100);
 const monthKey = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
 const today = () => new Date().toISOString().slice(0, 10);
 const paymentName = (key: string) => payments.find(([value]) => value === key)?.[1] ?? key;
+const isCardPayment = (key: string) => key === "cartao_joao" || key === "cartao_dena";
 
 export default function Home() {
   const [tab, setTab] = useState("resumo");
@@ -22,7 +23,7 @@ export default function Home() {
   const [data, setData] = useState<Data>({ categories: [], expenses: [] });
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
-  const [form, setForm] = useState({ amount: "", description: "", categoryId: "", paymentMethod: "pix", person: "João", occurredAt: today() });
+  const [form, setForm] = useState({ amount: "", description: "", categoryId: "", paymentMethod: "pix", installments: "1", person: "João", occurredAt: today() });
   const [categoryName, setCategoryName] = useState("");
   const [expenseCategory, setExpenseCategory] = useState("all");
   const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
@@ -48,10 +49,10 @@ export default function Home() {
   async function addExpense(event: React.FormEvent) {
     event.preventDefault();
     const response = await fetch("/api/finance", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "expense", ...form }) });
-    const result = await response.json() as { error?: string };
+    const result = await response.json() as { error?: string; installments?: number };
     if (!response.ok) return setNotice(result.error ?? "Não foi possível salvar.");
-    setForm({ ...form, amount: "", description: "", occurredAt: today() });
-    setNotice("Gasto salvo com sucesso."); setTab("gastos"); await load();
+    setForm({ ...form, amount: "", description: "", installments: "1", occurredAt: today() });
+    setNotice(result.installments && result.installments > 1 ? `${result.installments} parcelas lançadas nos próximos meses.` : "Gasto salvo com sucesso."); setTab("gastos"); await load();
   }
 
   async function addCategory(event: React.FormEvent) {
@@ -107,7 +108,8 @@ export default function Home() {
           <label>Valor (R$)<input autoFocus inputMode="decimal" placeholder="0,00" value={form.amount} onChange={e => setForm({...form, amount:e.target.value})} required /></label>
           <label className="wide">Onde foi gasto?<input placeholder="Ex.: Mercado Central" value={form.description} onChange={e => setForm({...form, description:e.target.value})} required /></label>
           <label>Categoria<select value={form.categoryId} onChange={e => setForm({...form, categoryId:e.target.value})} required><option value="">Selecione</option>{data.categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-          <label>Pagamento<select value={form.paymentMethod} onChange={e => setForm({...form, paymentMethod:e.target.value})}>{payments.map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select></label>
+          <label>Pagamento<select value={form.paymentMethod} onChange={e => setForm({...form, paymentMethod:e.target.value, installments:isCardPayment(e.target.value)?form.installments:"1"})}>{payments.map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select></label>
+          {isCardPayment(form.paymentMethod) && <label>Número de parcelas<input type="number" inputMode="numeric" min="1" max="60" value={form.installments} onChange={e=>setForm({...form,installments:e.target.value})} required/><small className="field-help">O valor total será dividido entre os meses.</small></label>}
           <label>Quem lançou?<select value={form.person} onChange={e => setForm({...form, person:e.target.value})}><option>João</option><option>Dena</option></select></label>
           <label>Data<input type="date" value={form.occurredAt} onChange={e => setForm({...form, occurredAt:e.target.value})} required /></label>
           <button className="primary wide" type="submit">Salvar gasto</button>

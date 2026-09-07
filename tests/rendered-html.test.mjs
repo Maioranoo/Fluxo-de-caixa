@@ -20,4 +20,11 @@ test("painel financeiro possui os fluxos essenciais", async () => {
   assert.match(page, /Filtrar por categoria/);
   assert.match(page, /Todas as categorias/);
   assert.match(page, /filteredExpenses/);
+  assert.match(page, /\["caju", "Caju"\]/);
+  assert.match(page, /Número de parcelas/);
+  assert.match(page, /installments/);
+  const api = await readFile(new URL("../app/api/finance/route.ts", import.meta.url), "utf8");
+  assert.match(api, /addMonths\(body\.occurredAt,index\)/);
+  assert.match(api, /Math\.floor\(amountCents \/ installmentCount\)/);
+  assert.match(api, /\$\{index \+ 1\}\/\$\{installmentCount\}/);
 });
