@@ -28,10 +28,25 @@ export async function POST(request: Request) {
   return Response.json({expense},{status:201});
 }
 
+export async function PATCH(request: Request) {
+  const body = await request.json() as Record<string,string>;
+  const id = Number(body.id), name = body.name?.trim();
+  if (body.type !== "category" || !id || !name) return Response.json({error:"Informe um nome válido."},{status:400});
+  try {
+    const [category] = await getDb().update(categories).set({name}).where(eq(categories.id,id)).returning();
+    if (!category) return Response.json({error:"Categoria não encontrada."},{status:404});
+    return Response.json({category});
+  } catch { return Response.json({error:"Já existe uma categoria com esse nome."},{status:409}); }
+}
+
 export async function DELETE(request: Request) {
-  const url = new URL(request.url), id = Number(url.searchParams.get("id"));
-  if (!id || url.searchParams.get("type") !== "expense") return Response.json({error:"Solicitação inválida."},{status:400});
-  await getDb().delete(expenses).where(eq(expenses.id,id)); return Response.json({ok:true});
+  const url = new URL(request.url), id = Number(url.searchParams.get("id")), type = url.searchParams.get("type");
+  if (!id || !["expense","category"].includes(type ?? "")) return Response.json({error:"Solicitação inválida."},{status:400});
+  const db = getDb();
+  if (type === "expense") { await db.delete(expenses).where(eq(expenses.id,id)); return Response.json({ok:true}); }
+  const linked = await db.select({id:expenses.id}).from(expenses).where(eq(expenses.categoryId,id)).limit(1);
+  if (linked.length) return Response.json({error:"Essa categoria possui gastos. Exclua esses gastos antes de apagar a categoria."},{status:409});
+  await db.delete(categories).where(eq(categories.id,id)); return Response.json({ok:true});
 }
 
 function parseMoney(value="") { const cleaned=value.replace(/R\$\s?/i,"").trim(); const normalized=cleaned.includes(",")?cleaned.replace(/\./g,"").replace(",","."):cleaned; const n=Number(normalized); return Number.isFinite(n)&&n>0?Math.round(n*100):null; }

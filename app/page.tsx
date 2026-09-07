@@ -24,6 +24,8 @@ export default function Home() {
   const [notice, setNotice] = useState("");
   const [form, setForm] = useState({ amount: "", description: "", categoryId: "", paymentMethod: "pix", person: "João", occurredAt: today() });
   const [categoryName, setCategoryName] = useState("");
+  const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
+  const [editingCategoryName, setEditingCategoryName] = useState("");
 
   async function load() {
     setLoading(true);
@@ -63,6 +65,23 @@ export default function Home() {
     setNotice("Gasto apagado."); await load();
   }
 
+  async function editCategory(event: React.FormEvent) {
+    event.preventDefault();
+    if (editingCategoryId === null) return;
+    const response = await fetch("/api/finance", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "category", id: editingCategoryId, name: editingCategoryName }) });
+    const result = await response.json() as { error?: string };
+    if (!response.ok) return setNotice(result.error ?? "Não foi possível editar a categoria.");
+    setEditingCategoryId(null); setEditingCategoryName(""); setNotice("Categoria atualizada."); await load();
+  }
+
+  async function removeCategory(id: number, name: string) {
+    if (!confirm(`Deseja realmente excluir a categoria “${name}”?`)) return;
+    const response = await fetch(`/api/finance?type=category&id=${id}`, { method: "DELETE" });
+    const result = await response.json() as { error?: string };
+    if (!response.ok) return setNotice(result.error ?? "Não foi possível excluir a categoria.");
+    setNotice("Categoria excluída."); await load();
+  }
+
   const monthLabel = new Date(`${month}-02T12:00:00`).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
 
   return <div className="app-shell">
@@ -91,7 +110,7 @@ export default function Home() {
           <button className="primary wide" type="submit">Salvar gasto</button>
         </form></Panel></section>}
         {tab === "gastos" && <section><ExpenseTable expenses={data.expenses} onDelete={removeExpense}/></section>}
-        {tab === "categorias" && <section className="narrow"><Panel title="Categorias"><form className="category-form" onSubmit={addCategory}><input placeholder="Nova categoria" value={categoryName} onChange={e=>setCategoryName(e.target.value)} required/><button className="primary">Adicionar</button></form><div className="category-list">{data.categories.map(c=><div key={c.id}><span>{c.name.slice(0,1).toUpperCase()}</span>{c.name}</div>)}{!data.categories.length&&<Empty text="Nenhuma categoria criada."/>}</div></Panel></section>}
+        {tab === "categorias" && <section className="narrow"><Panel title="Categorias"><form className="category-form" onSubmit={addCategory}><input placeholder="Nova categoria" value={categoryName} onChange={e=>setCategoryName(e.target.value)} required/><button className="primary">Adicionar</button></form><div className="category-list">{data.categories.map(c=>editingCategoryId === c.id ? <form className="category-edit" key={c.id} onSubmit={editCategory}><input autoFocus value={editingCategoryName} onChange={e=>setEditingCategoryName(e.target.value)} required aria-label={`Novo nome de ${c.name}`}/><button className="primary" type="submit">Salvar</button><button className="secondary" type="button" onClick={()=>setEditingCategoryId(null)}>Cancelar</button></form> : <div className="category-item" key={c.id}><span>{c.name.slice(0,1).toUpperCase()}</span><b>{c.name}</b><div className="category-actions"><button className="secondary" type="button" onClick={()=>{setEditingCategoryId(c.id);setEditingCategoryName(c.name)}}>Editar</button><button className="danger" type="button" onClick={()=>removeCategory(c.id,c.name)}>Excluir</button></div></div>)}{!data.categories.length&&<Empty text="Nenhuma categoria criada."/>}</div></Panel></section>}
         {tab === "relatorio" && <section className="print-area"><div className="report-head"><div><p>FATURA MENSAL</p><h2>{monthLabel}</h2></div><button className="primary no-print" onClick={()=>window.print()}>Imprimir / salvar PDF</button></div><ExpenseTable expenses={data.expenses} onDelete={removeExpense} readonly/><div className="report-total"><span>Total da fatura</span><strong>{money(total)}</strong></div></section>}
       </>}
     </main>
