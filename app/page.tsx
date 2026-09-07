@@ -8,7 +8,7 @@ type Data = { categories: Category[]; expenses: Expense[] };
 
 const payments = [
   ["cartao_joao", "Cartão João"], ["cartao_dena", "Cartão Dena"], ["pix", "Pix"],
-  ["boleto", "Boleto"], ["dinheiro", "Dinheiro"], ["credito", "Crédito"], ["debito", "Débito"]
+  ["boleto", "Boleto"]
 ];
 
 const money = (cents: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cents / 100);

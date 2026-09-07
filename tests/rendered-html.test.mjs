@@ -9,4 +9,7 @@ test("painel financeiro possui os fluxos essenciais", async () => {
   assert.match(page, /Cartão Dena/);
   assert.match(page, /Imprimir \/ salvar PDF/);
   assert.match(page, /Categorias/);
+  assert.doesNotMatch(page, /\["dinheiro",/);
+  assert.doesNotMatch(page, /\["credito",/);
+  assert.doesNotMatch(page, /\["debito",/);
 });
