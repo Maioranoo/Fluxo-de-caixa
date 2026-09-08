@@ -27,4 +27,7 @@ test("painel financeiro possui os fluxos essenciais", async () => {
   assert.match(api, /addMonths\(body\.occurredAt,index\)/);
   assert.match(api, /Math\.floor\(amountCents \/ installmentCount\)/);
   assert.match(api, /\$\{index \+ 1\}\/\$\{installmentCount\}/);
+  assert.match(page, /onPaymentChange={updateExpensePayment}/);
+  assert.match(page, /className="table-payment"/);
+  assert.match(api, /body\.type === "expense_payment"/);
 });

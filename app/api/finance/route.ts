@@ -38,6 +38,13 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   const body = await request.json() as Record<string,string>;
+  if (body.type === "expense_payment") {
+    const id = Number(body.id), paymentMethods = ["cartao_joao","cartao_dena","pix","boleto","caju"];
+    if (!id || !paymentMethods.includes(body.paymentMethod)) return Response.json({error:"Forma de pagamento inválida."},{status:400});
+    const [expense] = await getDb().update(expenses).set({paymentMethod:body.paymentMethod}).where(eq(expenses.id,id)).returning();
+    if (!expense) return Response.json({error:"Gasto não encontrado."},{status:404});
+    return Response.json({expense});
+  }
   const id = Number(body.id), name = body.name?.trim();
   if (body.type !== "category" || !id || !name) return Response.json({error:"Informe um nome válido."},{status:400});
   try {
