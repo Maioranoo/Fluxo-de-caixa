@@ -9,6 +9,10 @@ test("painel financeiro possui os fluxos essenciais", async () => {
   assert.match(page, /className="add-inline"/);
   assert.doesNotMatch(page, /\["pagamentos","\$","Pagamentos"\]/);
   assert.match(page, /Imprimir \/ salvar PDF/);
+  assert.match(page, /Total de gastos/);
+  assert.match(page, /Total de entradas/);
+  assert.match(page, /Saldo do mês/);
+  assert.match(page, /IncomeTable incomes={data\.incomes} onDelete={removeIncome} readonly/);
   assert.match(page, /Categorias/);
   assert.doesNotMatch(page, /\["dinheiro",/);
   assert.doesNotMatch(page, /\["credito",/);
@@ -77,4 +81,23 @@ test("painel administrativo exige autorização no servidor", async () => {
   assert.match(admin, /if \(!context\.isAdmin\)/);
   assert.match(admin, /Somente o administrador pode criar famílias/);
   assert.match(admin, /requireAdmin\(request\)/);
+});
+
+test("entradas são opcionais e permanecem isoladas por família", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const api = await readFile(new URL("../app/api/finance/route.ts", import.meta.url), "utf8");
+  const admin = await readFile(new URL("../app/api/admin/households/route.ts", import.meta.url), "utf8");
+  const schema = await readFile(new URL("../db/schema.ts", import.meta.url), "utf8");
+  assert.match(schema, /allowIncome/);
+  assert.match(schema, /idx_incomes_household_date/);
+  assert.match(page, /Permitir entrada e saída de dinheiro/);
+  assert.match(page, /data\.household\?\.allowIncome/);
+  assert.match(page, /SALDO EM/);
+  assert.match(page, /TOTAL DE GASTOS EM/);
+  assert.match(page, /TOTAL DE ENTRADAS EM/);
+  assert.match(page, /balance < 0 \? "negative" : "positive"/);
+  assert.match(api, /Entradas não estão habilitadas para esta família/);
+  assert.ok((api.match(/eq\(incomes\.householdId, context\.householdId\)/g) ?? []).length >= 2);
+  assert.match(admin, /if \(!context\.isAdmin\)/);
+  assert.match(admin, /typeof body\.allowIncome !== "boolean"/);
 });

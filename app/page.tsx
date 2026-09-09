@@ -6,7 +6,9 @@ type Category = { id: number; name: string };
 type Member = { id: number; name: string };
 type Payment = { id: number; key: string; name: string; isCard: boolean };
 type Expense = { id: number; amountCents: number; description: string; categoryId: number; category: string; paymentMethod: string; person: string; occurredAt: string };
-type Data = { categories: Category[]; expenses: Expense[]; members: Member[]; payments: Payment[]; households: { id:number; name:string }[]; household: { id: number; name: string } | null; currentMember: string; isAdmin: boolean };
+type Income = { id: number; amountCents: number; description: string; person: string; occurredAt: string };
+type Household = { id: number; name: string; allowIncome: boolean };
+type Data = { categories: Category[]; expenses: Expense[]; incomes: Income[]; members: Member[]; payments: Payment[]; households: Household[]; household: Household | null; currentMember: string; isAdmin: boolean };
 
 const money = (cents: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cents / 100);
 const monthKey = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
@@ -15,7 +17,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 export default function Home() {
   const [tab, setTab] = useState("resumo");
   const [month, setMonth] = useState(monthKey());
-  const [data, setData] = useState<Data>({ categories: [], expenses: [], members: [], payments: [], households: [], household: null, currentMember: "", isAdmin: false });
+  const [data, setData] = useState<Data>({ categories: [], expenses: [], incomes: [], members: [], payments: [], households: [], household: null, currentMember: "", isAdmin: false });
   const [selectedHousehold, setSelectedHousehold] = useState("");
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
@@ -26,7 +28,8 @@ export default function Home() {
   const [editingCategoryName, setEditingCategoryName] = useState("");
   const [paymentForm, setPaymentForm] = useState({ name: "", isCard: false });
   const [showPaymentForm, setShowPaymentForm] = useState(false);
-  const [adminForm, setAdminForm] = useState({ name: "", members: [{ name: "", email: "" }, { name: "", email: "" }] });
+  const [incomeForm, setIncomeForm] = useState({ amount: "", description: "", person: "", occurredAt: today() });
+  const [adminForm, setAdminForm] = useState({ name: "", allowIncome: false, members: [{ name: "", email: "" }, { name: "", email: "" }] });
   const payments = useMemo(() => data.payments.map(payment => [payment.key, payment.name]), [data.payments]);
   const isCardPayment = (key: string) => data.payments.some(payment => payment.key === key && payment.isCard);
   const paymentName = (key: string) => data.payments.find(payment => payment.key === key)?.name ?? key;
@@ -35,7 +38,7 @@ export default function Home() {
     let active = true;
     void fetch(`/api/finance?month=${month}`, { headers: selectedHousehold ? { "x-household-id": selectedHousehold } : {} }).then(response => response.json()).then((payload: Data & { error?: string }) => {
       if (!active) return;
-      if (payload.error) setNotice(payload.error); else { setData(payload); if (!selectedHousehold && payload.household) setSelectedHousehold(String(payload.household.id)); setForm(current => ({ ...current, person: payload.currentMember || payload.members[0]?.name || current.person, categoryId: "", paymentMethod: "" })); }
+      if (payload.error) setNotice(payload.error); else { setData(payload); if (!selectedHousehold && payload.household) setSelectedHousehold(String(payload.household.id)); const person = payload.currentMember || payload.members[0]?.name || ""; setForm(current => ({ ...current, person: person || current.person, categoryId: "", paymentMethod: "" })); setIncomeForm(current => ({ ...current, person: person || current.person })); if (!payload.household?.allowIncome) setTab(current => current === "entradas" ? "resumo" : current); }
       setLoading(false);
     }).catch(() => { if (active) { setNotice("Não foi possível acessar os dados agora."); setLoading(false); } });
     return () => { active = false; };
@@ -49,6 +52,8 @@ export default function Home() {
   const cardsTotal = cardTotals.reduce((sum, item) => sum + item.total, 0);
   const filteredExpenses = useMemo(() => expenseCategory === "all" ? data.expenses : data.expenses.filter(item => String(item.categoryId) === expenseCategory), [data.expenses, expenseCategory]);
   const filteredTotal = useMemo(() => filteredExpenses.reduce((sum, item) => sum + item.amountCents, 0), [filteredExpenses]);
+  const incomeTotal = useMemo(() => data.incomes.reduce((sum, item) => sum + item.amountCents, 0), [data.incomes]);
+  const balance = incomeTotal - total;
 
   async function addExpense(event: React.FormEvent) {
     event.preventDefault();
@@ -123,12 +128,45 @@ export default function Home() {
     event.preventDefault();
     const members = adminForm.members.filter(member => member.name.trim() && member.email.trim());
     if (!adminForm.name.trim() || !members.length) return setNotice("Informe o nome da família e pelo menos um integrante.");
-    const response = await fetch("/api/admin/households", { method: "POST", headers: writeHeaders, body: JSON.stringify({ name: adminForm.name, members }) });
-    const result = await response.json() as { error?: string; household?: { id:number; name:string } };
+    const response = await fetch("/api/admin/households", { method: "POST", headers: writeHeaders, body: JSON.stringify({ name: adminForm.name, members, allowIncome: adminForm.allowIncome }) });
+    const result = await response.json() as { error?: string; household?: Household };
     if (!response.ok || !result.household) return setNotice(result.error ?? "Não foi possível criar a família.");
     setData(current => ({ ...current, households: [...current.households, result.household!].sort((a,b)=>a.name.localeCompare(b.name)) }));
-    setAdminForm({ name: "", members: [{ name: "", email: "" }, { name: "", email: "" }] });
+    setAdminForm({ name: "", allowIncome: false, members: [{ name: "", email: "" }, { name: "", email: "" }] });
     setNotice(`Carteira “${result.household.name}” criada com sucesso.`); setSelectedHousehold(String(result.household.id)); setTab("resumo");
+  }
+
+  async function addIncome(event: React.FormEvent) {
+    event.preventDefault();
+    const amountCents = parseMoney(incomeForm.amount);
+    if (!amountCents || !incomeForm.description.trim() || !incomeForm.person || !incomeForm.occurredAt) return setNotice("Preencha todos os campos da entrada.");
+    const temporary: Income = { id: -Date.now(), amountCents, description: incomeForm.description.trim(), person: incomeForm.person, occurredAt: incomeForm.occurredAt };
+    if (temporary.occurredAt.startsWith(month)) setData(current => ({ ...current, incomes: [...current.incomes, temporary] }));
+    setNotice("Salvando entrada…");
+    const response = await fetch("/api/finance", { method: "POST", headers: writeHeaders, body: JSON.stringify({ type: "income", ...incomeForm }) });
+    const result = await response.json() as { error?: string; income?: Income };
+    if (!response.ok || !result.income) { setData(current => ({ ...current, incomes: current.incomes.filter(item => item.id > 0) })); return setNotice(result.error ?? "Não foi possível salvar a entrada."); }
+    setData(current => ({ ...current, incomes: [...current.incomes.filter(item => item.id > 0), ...(result.income!.occurredAt.startsWith(month) ? [result.income!] : [])] }));
+    setIncomeForm(current => ({ ...current, amount: "", description: "", occurredAt: today() }));
+    setNotice("Entrada salva com sucesso.");
+  }
+
+  async function removeIncome(id: number) {
+    if (!confirm("Deseja realmente apagar esta entrada?")) return;
+    const removed = data.incomes.find(item => item.id === id);
+    setData(current => ({ ...current, incomes: current.incomes.filter(item => item.id !== id) }));
+    const response = await fetch(`/api/finance?type=income&id=${id}`, { method: "DELETE", headers: selectedHousehold ? { "x-household-id": selectedHousehold } : {} });
+    if (!response.ok) { if (removed) setData(current => ({ ...current, incomes: [...current.incomes, removed] })); return setNotice("Não foi possível apagar a entrada."); }
+    setNotice("Entrada apagada.");
+  }
+
+  async function setHouseholdIncome(householdId: number, allowIncome: boolean) {
+    const response = await fetch("/api/admin/households", { method: "PATCH", headers: writeHeaders, body: JSON.stringify({ householdId, allowIncome }) });
+    const result = await response.json() as { error?: string; household?: Household };
+    if (!response.ok || !result.household) return setNotice(result.error ?? "Não foi possível alterar a configuração.");
+    setData(current => ({ ...current, households: current.households.map(item => item.id === householdId ? { ...item, allowIncome } : item), household: current.household?.id === householdId ? { ...current.household, allowIncome } : current.household }));
+    if (!allowIncome && data.household?.id === householdId && tab === "entradas") setTab("resumo");
+    setNotice(allowIncome ? "Entradas e saídas habilitadas para esta família." : "A família voltou ao controle somente de gastos.");
   }
 
   function updateAdminMember(index:number, field:"name"|"email", value:string) {
@@ -140,7 +178,7 @@ export default function Home() {
   return <div className="app-shell">
     <aside>
       <div className="brand"><span>F</span><div><strong>Finanças</strong><small>da família</small></div></div>
-      <nav>{[["resumo","⌂","Resumo"],["novo","＋","Novo gasto"],["gastos","≡","Gastos"],["categorias","◇","Categorias"],["relatorio","▤","Relatório"]].map(([id, icon, label]) =>
+      <nav>{[["resumo","⌂","Resumo"],["novo","＋","Novo gasto"],["gastos","≡","Gastos"],...(data.household?.allowIncome ? [["entradas","↙","Entradas"]] : []),["categorias","◇","Categorias"],["relatorio","▤","Relatório"]].map(([id, icon, label]) =>
         <button key={id} className={tab === id ? "active" : ""} onClick={() => setTab(id)}><i>{icon}</i>{label}</button>)}</nav>
       <div className="side-note"><b>{data.isAdmin ? "Acesso de administrador" : "Carteira compartilhada"}</b>{data.isAdmin && data.households.length ? <select aria-label="Selecionar carteira" value={selectedHousehold} onChange={event=>setSelectedHousehold(event.target.value)}>{data.households.map(household=><option key={household.id} value={household.id}>{household.name}</option>)}</select> : <span>{data.household?.name ?? "Sua família"}</span>}{data.isAdmin && <button className={tab === "admin" ? "admin-link active" : "admin-link"} onClick={()=>setTab("admin")}>⚙ Painel adm</button>}</div>
     </aside>
@@ -149,7 +187,7 @@ export default function Home() {
       {notice && <button className="notice" onClick={() => setNotice("")}>{notice}<span>×</span></button>}
       {loading ? <div className="loading">Carregando seus dados…</div> : <>
         {tab === "resumo" && <section>
-          <div className="hero-card"><div><small>TOTAL EM {monthLabel.toUpperCase()}</small><strong>{money(total)}</strong><span>{data.expenses.length} lançamento{data.expenses.length === 1 ? "" : "s"}</span></div><div className="hero-mark">↗</div></div>
+          {data.household?.allowIncome ? <div className="summary-finance-grid"><div className="summary-money expenses"><small>TOTAL DE GASTOS EM {monthLabel.toUpperCase()}</small><strong>{money(total)}</strong><span>{data.expenses.length} gasto{data.expenses.length === 1 ? "" : "s"}</span></div><div className="summary-money incomes"><small>TOTAL DE ENTRADAS EM {monthLabel.toUpperCase()}</small><strong>{money(incomeTotal)}</strong><span>{data.incomes.length} entrada{data.incomes.length === 1 ? "" : "s"}</span></div><div className={`summary-money balance ${balance < 0 ? "negative" : "positive"}`}><small>SALDO EM {monthLabel.toUpperCase()}</small><strong>{balance < 0 ? "−" : "+"}{money(Math.abs(balance))}</strong><span>Entradas menos gastos</span></div></div> : <div className="hero-card"><div><small>TOTAL DE GASTOS EM {monthLabel.toUpperCase()}</small><strong>{money(total)}</strong><span>{data.expenses.length} lançamento{data.expenses.length === 1 ? "" : "s"}</span></div><div className="hero-mark">↗</div></div>}
           <div className="mini-grid">{cardTotals.map(item => <Metric key={item.name} label={item.name} value={item.total}/>)}{cardTotals.length > 1 && <Metric label="Cartões somados" value={cardsTotal}/>}</div>
           <div className="content-grid"><Panel title="Por categoria"><Bars rows={byCategory}/></Panel><Panel title="Por pagamento"><Bars rows={byPayment.map(x => ({...x, name: x.name === "cartao" ? "Cartões" : paymentName(x.name)}))}/></Panel></div>
         </section>}
@@ -165,9 +203,10 @@ export default function Home() {
           <button className="primary wide" type="submit">Salvar gasto</button>
         </form></Panel></section>}
         {tab === "gastos" && <section><div className="expense-filter"><label>Filtrar por categoria<select value={expenseCategory} onChange={e=>setExpenseCategory(e.target.value)}><option value="all">Todas as categorias</option>{data.categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><div><span>{filteredExpenses.length} gasto{filteredExpenses.length === 1 ? "" : "s"} no mês</span><strong>{money(filteredTotal)}</strong></div></div><ExpenseTable expenses={filteredExpenses} paymentOptions={payments} paymentName={paymentName} onDelete={removeExpense} onPaymentChange={updateExpensePayment}/></section>}
+        {tab === "entradas" && data.household?.allowIncome && <section><div className="income-month-head"><div><span>Entradas do mês</span><strong>{money(incomeTotal)}</strong></div><small>{data.incomes.length} entrada{data.incomes.length === 1 ? "" : "s"} em {monthLabel}</small></div><div className="income-layout"><Panel title="Adicionar entrada"><form className="income-form" onSubmit={addIncome}><label>Valor (R$)<input autoFocus inputMode="decimal" placeholder="0,00" value={incomeForm.amount} onChange={event=>setIncomeForm({...incomeForm,amount:event.target.value})} required/></label><label>Descrição<input placeholder="Ex.: Salário" value={incomeForm.description} onChange={event=>setIncomeForm({...incomeForm,description:event.target.value})} required/></label><label>Quem lançou?<select value={incomeForm.person || data.currentMember} onChange={event=>setIncomeForm({...incomeForm,person:event.target.value})} required><option value="">Selecione</option>{data.members.map(member=><option key={member.id} value={member.name}>{member.name}</option>)}</select></label><label>Data<input type="date" value={incomeForm.occurredAt} onChange={event=>setIncomeForm({...incomeForm,occurredAt:event.target.value})} required/></label><button className="primary" type="submit">Salvar entrada</button></form></Panel><Panel title={`Entradas de ${monthLabel}`}><IncomeTable incomes={data.incomes} onDelete={removeIncome}/></Panel></div></section>}
         {tab === "categorias" && <section className="narrow"><Panel title="Categorias"><form className="category-form" onSubmit={addCategory}><input placeholder="Nova categoria" value={categoryName} onChange={e=>setCategoryName(e.target.value)} required/><button className="primary">Adicionar</button></form><div className="category-list">{data.categories.map(c=>editingCategoryId === c.id ? <form className="category-edit" key={c.id} onSubmit={editCategory}><input autoFocus value={editingCategoryName} onChange={e=>setEditingCategoryName(e.target.value)} required aria-label={`Novo nome de ${c.name}`}/><button className="primary" type="submit">Salvar</button><button className="secondary" type="button" onClick={()=>setEditingCategoryId(null)}>Cancelar</button></form> : <div className="category-item" key={c.id}><span>{c.name.slice(0,1).toUpperCase()}</span><b>{c.name}</b><div className="category-actions"><button className="icon-button edit-icon" type="button" aria-label={`Editar ${c.name}`} title="Editar" onClick={()=>{setEditingCategoryId(c.id);setEditingCategoryName(c.name)}}>✎</button><button className="icon-button delete-icon" type="button" aria-label={`Excluir ${c.name}`} title="Excluir" onClick={()=>removeCategory(c.id,c.name)}>🗑</button></div></div>)}{!data.categories.length&&<Empty text="Nenhuma categoria criada."/>}</div></Panel></section>}
-        {tab === "admin" && data.isAdmin && <section className="narrow"><Panel title="Cadastrar nova família"><form className="admin-form" onSubmit={createHousehold}><label>Nome da família<input autoFocus placeholder="Ex.: Família Taty e Rildo" value={adminForm.name} onChange={event=>setAdminForm({...adminForm,name:event.target.value})} required/></label><div className="admin-members"><div className="admin-members-head"><b>Integrantes</b><button type="button" className="secondary" onClick={()=>setAdminForm(current=>({...current,members:[...current.members,{name:"",email:""}]}))}>+ Integrante</button></div>{adminForm.members.map((member,index)=><div className="admin-member" key={index}><input placeholder="Nome" aria-label={`Nome do integrante ${index+1}`} value={member.name} onChange={event=>updateAdminMember(index,"name",event.target.value)}/><input type="email" placeholder="E-mail de acesso" aria-label={`E-mail do integrante ${index+1}`} value={member.email} onChange={event=>updateAdminMember(index,"email",event.target.value)}/>{adminForm.members.length>1&&<button type="button" className="delete" aria-label={`Remover integrante ${index+1}`} onClick={()=>setAdminForm(current=>({...current,members:current.members.filter((_,memberIndex)=>memberIndex!==index)}))}>×</button>}</div>)}</div><button className="primary" type="submit">Criar carteira da família</button><small className="admin-help">A carteira será criada vazia. Para entrar no site, os e-mails também precisam ser liberados no acesso privado da publicação.</small></form></Panel></section>}
-        {tab === "relatorio" && <section className="print-area"><div className="report-head"><div><p>FATURA MENSAL</p><h2>{monthLabel}</h2></div><button className="primary no-print" onClick={()=>window.print()}>Imprimir / salvar PDF</button></div><ExpenseTable expenses={data.expenses} paymentOptions={payments} paymentName={paymentName} onDelete={removeExpense} readonly/><div className="report-total"><span>Total da fatura</span><strong>{money(total)}</strong></div></section>}
+        {tab === "admin" && data.isAdmin && <section className="admin-grid"><Panel title="Cadastrar nova família"><form className="admin-form" onSubmit={createHousehold}><label>Nome da família<input autoFocus placeholder="Ex.: Família Taty e Rildo" value={adminForm.name} onChange={event=>setAdminForm({...adminForm,name:event.target.value})} required/></label><label className="feature-toggle"><input type="checkbox" checked={adminForm.allowIncome} onChange={event=>setAdminForm({...adminForm,allowIncome:event.target.checked})}/><span><b>Permitir entrada e saída de dinheiro</b><small>Adiciona a aba Entradas e o saldo mensal desta família.</small></span></label><div className="admin-members"><div className="admin-members-head"><b>Integrantes</b><button type="button" className="secondary" onClick={()=>setAdminForm(current=>({...current,members:[...current.members,{name:"",email:""}]}))}>+ Integrante</button></div>{adminForm.members.map((member,index)=><div className="admin-member" key={index}><input placeholder="Nome" aria-label={`Nome do integrante ${index+1}`} value={member.name} onChange={event=>updateAdminMember(index,"name",event.target.value)}/><input type="email" placeholder="E-mail de acesso" aria-label={`E-mail do integrante ${index+1}`} value={member.email} onChange={event=>updateAdminMember(index,"email",event.target.value)}/>{adminForm.members.length>1&&<button type="button" className="delete" aria-label={`Remover integrante ${index+1}`} onClick={()=>setAdminForm(current=>({...current,members:current.members.filter((_,memberIndex)=>memberIndex!==index)}))}>×</button>}</div>)}</div><button className="primary" type="submit">Criar carteira da família</button><small className="admin-help">A carteira será criada vazia. Para entrar no site, os e-mails também precisam ser liberados no acesso privado da publicação.</small></form></Panel><Panel title="Funcionalidades por família"><div className="household-settings">{data.households.map(household=><label className="feature-toggle" key={household.id}><input type="checkbox" checked={household.allowIncome} onChange={event=>void setHouseholdIncome(household.id,event.target.checked)}/><span><b>{household.name}</b><small>{household.allowIncome ? "Entradas e saídas habilitadas" : "Somente controle de gastos"}</small></span></label>)}</div></Panel></section>}
+        {tab === "relatorio" && <section className="print-area"><div className="report-head"><div><p>RELATÓRIO MENSAL</p><h2>{monthLabel}</h2></div><button className="primary no-print" onClick={()=>window.print()}>Imprimir / salvar PDF</button></div><div className="report-section"><h3>Gastos</h3><ExpenseTable expenses={data.expenses} paymentOptions={payments} paymentName={paymentName} onDelete={removeExpense} readonly/><div className="report-total"><span>Total de gastos</span><strong>{money(total)}</strong></div></div>{data.household?.allowIncome && <><div className="report-section"><h3>Entradas</h3><IncomeTable incomes={data.incomes} onDelete={removeIncome} readonly/><div className="report-total income-total"><span>Total de entradas</span><strong>{money(incomeTotal)}</strong></div></div><div className={`report-balance ${balance < 0 ? "negative" : "positive"}`}><div><span>Saldo do mês</span><small>Total de entradas menos total de gastos</small></div><strong>{balance < 0 ? "−" : "+"}{money(Math.abs(balance))}</strong></div></>}</section>}
       </>}
     </main>
   </div>;
@@ -178,7 +217,8 @@ function Panel({title,children}:{title:string,children:React.ReactNode}) { retur
 function Empty({text}:{text:string}) { return <div className="empty">{text}</div>; }
 function Bars({rows}:{rows:{name:string,total:number}[]}) { const max=Math.max(...rows.map(x=>x.total),1); return <div className="bars">{rows.map(r=><div key={r.name}><span>{r.name}</span><div><i style={{width:`${Math.max(4,r.total/max*100)}%`}}/></div><b>{money(r.total)}</b></div>)}{!rows.length&&<Empty text="Sem gastos neste mês."/>}</div>; }
 function ExpenseTable({expenses,onDelete,onPaymentChange,paymentOptions,paymentName,readonly=false}:{expenses:Expense[],onDelete:(id:number)=>void,onPaymentChange?:(id:number,paymentMethod:string)=>void,paymentOptions:string[][],paymentName:(key:string)=>string,readonly?:boolean}) { return <div className="table-wrap"><table><thead><tr><th>Data</th><th>Origem</th><th>Categoria</th><th>Pagamento</th><th>Pessoa</th><th>Valor</th>{!readonly&&<th/>}</tr></thead><tbody>{expenses.map(e=><tr key={e.id}><td>{e.occurredAt.split("-").reverse().join("/")}</td><td><b>{e.description}</b></td><td><span className="tag">{e.category}</span></td><td>{readonly ? paymentName(e.paymentMethod) : <select className="table-payment" value={e.paymentMethod} onChange={event=>onPaymentChange?.(e.id,event.target.value)} aria-label={`Pagamento de ${e.description}`}>{paymentOptions.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select>}</td><td>{e.person}</td><td><b>{money(e.amountCents)}</b></td>{!readonly&&<td><button className="delete" onClick={()=>onDelete(e.id)} aria-label={`Excluir ${e.description}`}>×</button></td>}</tr>)}</tbody></table>{!expenses.length&&<Empty text="Nenhum gasto registrado neste mês."/>}</div>; }
+function IncomeTable({incomes,onDelete,readonly=false}:{incomes:Income[],onDelete:(id:number)=>void,readonly?:boolean}) { return <div className={`income-list${readonly ? " report-income-list" : ""}`}>{incomes.map(item=><div key={item.id}>{!readonly&&<span className="income-arrow">↙</span>}<div><b>{item.description}</b><small>{item.occurredAt.split("-").reverse().join("/")} · {item.person}</small></div><strong>{money(item.amountCents)}</strong>{!readonly&&<button className="delete" onClick={()=>onDelete(item.id)} aria-label={`Excluir entrada ${item.description}`}>×</button>}</div>)}{!incomes.length&&<Empty text="Nenhuma entrada registrada neste mês."/>}</div>; }
 function groupTotals(items:Expense[], key:(item:Expense)=>string) { const map=new Map<string,number>(); items.forEach(i=>map.set(key(i),(map.get(key(i))??0)+i.amountCents)); return [...map].map(([name,total])=>({name,total})).sort((a,b)=>b.total-a.total); }
-function tabTitle(tab:string) { return ({resumo:"Visão geral",novo:"Adicionar gasto",gastos:"Histórico de gastos",categorias:"Suas categorias",relatorio:"Relatório mensal",admin:"Painel administrativo"} as Record<string,string>)[tab]; }
+function tabTitle(tab:string) { return ({resumo:"Visão geral",novo:"Adicionar gasto",gastos:"Histórico de gastos",entradas:"Entradas e saldo",categorias:"Suas categorias",relatorio:"Relatório mensal",admin:"Painel administrativo"} as Record<string,string>)[tab]; }
 function parseMoney(value:string) { const cleaned=value.replace(/R\$\s?/i,"").trim(); const normalized=cleaned.includes(",")?cleaned.replace(/\./g,"").replace(",","."):cleaned; const number=Number(normalized); return Number.isFinite(number)&&number>0?Math.round(number*100):null; }
 function addMonths(date:string,offset:number) { const [year,month,day]=date.split("-").map(Number); const first=new Date(Date.UTC(year,month-1+offset,1)); const lastDay=new Date(Date.UTC(first.getUTCFullYear(),first.getUTCMonth()+1,0)).getUTCDate(); return `${first.getUTCFullYear()}-${String(first.getUTCMonth()+1).padStart(2,"0")}-${String(Math.min(day,lastDay)).padStart(2,"0")}`; }

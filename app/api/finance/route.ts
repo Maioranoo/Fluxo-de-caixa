@@ -1,7 +1,7 @@
 import { and, asc, eq, gte, lt } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { AccessError, requireHousehold } from "../../../db/tenancy";
-import { categories, expenses, householdMembers, households, paymentMethods } from "../../../db/schema";
+import { categories, expenses, householdMembers, households, incomes, paymentMethods } from "../../../db/schema";
 
 export async function GET(request: Request) {
   try {
@@ -9,22 +9,35 @@ export async function GET(request: Request) {
     const month = new URL(request.url).searchParams.get("month") ?? new Date().toISOString().slice(0, 7);
     if (!/^\d{4}-\d{2}$/.test(month)) return Response.json({ error: "Mês inválido." }, { status: 400 });
     const start = `${month}-01`, end = nextMonth(month), db = getDb();
-    const [categoryRows, expenseRows, memberRows, paymentRows, householdRows] = await Promise.all([
+    const [categoryRows, expenseRows, incomeRows, memberRows, paymentRows, householdRows, currentHouseholdRows] = await Promise.all([
       db.select({ id: categories.id, name: categories.name }).from(categories).where(eq(categories.householdId, context.householdId)).orderBy(asc(categories.name)),
       db.select({ id: expenses.id, amountCents: expenses.amountCents, description: expenses.description, categoryId: expenses.categoryId, category: categories.name, paymentMethod: expenses.paymentMethod, person: expenses.person, occurredAt: expenses.occurredAt })
         .from(expenses).innerJoin(categories, and(eq(expenses.categoryId, categories.id), eq(categories.householdId, context.householdId)))
         .where(and(eq(expenses.householdId, context.householdId), gte(expenses.occurredAt, start), lt(expenses.occurredAt, end))).orderBy(asc(expenses.occurredAt), asc(expenses.id)),
+      db.select({ id: incomes.id, amountCents: incomes.amountCents, description: incomes.description, person: incomes.person, occurredAt: incomes.occurredAt })
+        .from(incomes).where(and(eq(incomes.householdId, context.householdId), gte(incomes.occurredAt, start), lt(incomes.occurredAt, end))).orderBy(asc(incomes.occurredAt), asc(incomes.id)),
       db.select({ id: householdMembers.id, name: householdMembers.displayName }).from(householdMembers).where(eq(householdMembers.householdId, context.householdId)).orderBy(asc(householdMembers.displayName)),
       db.select({ id: paymentMethods.id, key: paymentMethods.key, name: paymentMethods.name, isCard: paymentMethods.isCard }).from(paymentMethods).where(eq(paymentMethods.householdId, context.householdId)).orderBy(asc(paymentMethods.name)),
-      context.isAdmin ? db.select({ id: households.id, name: households.name }).from(households).orderBy(asc(households.name)) : Promise.resolve([]),
+      context.isAdmin ? db.select({ id: households.id, name: households.name, allowIncome: households.allowIncome }).from(households).orderBy(asc(households.name)) : Promise.resolve([]),
+      db.select({ allowIncome: households.allowIncome }).from(households).where(eq(households.id, context.householdId)).limit(1),
     ]);
-    return Response.json({ categories: categoryRows, expenses: expenseRows, members: memberRows, payments: paymentRows, households: householdRows, household: { id: context.householdId, name: context.householdName }, currentMember: memberRows.some(member => member.name === context.displayName) ? context.displayName : memberRows[0]?.name ?? "", isAdmin: context.isAdmin });
+    const allowIncome = currentHouseholdRows[0]?.allowIncome === true;
+    return Response.json({ categories: categoryRows, expenses: expenseRows, incomes: allowIncome ? incomeRows : [], members: memberRows, payments: paymentRows, households: householdRows, household: { id: context.householdId, name: context.householdName, allowIncome }, currentMember: memberRows.some(member => member.name === context.displayName) ? context.displayName : memberRows[0]?.name ?? "", isAdmin: context.isAdmin });
   } catch (error) { return accessResponse(error); }
 }
 
 export async function POST(request: Request) {
   try {
     const context = await requireHousehold(request), body = await request.json() as Record<string, string>, db = getDb();
+    if (body.type === "income") {
+      const [household] = await db.select({ allowIncome: households.allowIncome }).from(households).where(eq(households.id, context.householdId)).limit(1);
+      if (!household?.allowIncome) return Response.json({ error: "Entradas não estão habilitadas para esta família." }, { status: 403 });
+      const amountCents = parseMoney(body.amount);
+      const allowedPeople = await db.select({ name: householdMembers.displayName }).from(householdMembers).where(eq(householdMembers.householdId, context.householdId));
+      if (!amountCents || !body.description?.trim() || !body.occurredAt || !allowedPeople.some(person => person.name === body.person)) return Response.json({ error: "Preencha todos os campos corretamente." }, { status: 400 });
+      const [income] = await db.insert(incomes).values({ householdId: context.householdId, amountCents, description: body.description.trim(), person: body.person, occurredAt: body.occurredAt }).returning({ id: incomes.id, amountCents: incomes.amountCents, description: incomes.description, person: incomes.person, occurredAt: incomes.occurredAt });
+      return Response.json({ income }, { status: 201 });
+    }
     if (body.type === "category") {
       const name = body.name?.trim();
       if (!name) return Response.json({ error: "Informe o nome da categoria." }, { status: 400 });
@@ -80,10 +93,14 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   try {
     const context = await requireHousehold(request), url = new URL(request.url), id = Number(url.searchParams.get("id")), type = url.searchParams.get("type"), db = getDb();
-    if (!id || !["expense", "category", "payment"].includes(type ?? "")) return Response.json({ error: "Solicitação inválida." }, { status: 400 });
+    if (!id || !["expense", "income", "category", "payment"].includes(type ?? "")) return Response.json({ error: "Solicitação inválida." }, { status: 400 });
     if (type === "expense") {
       const deleted = await db.delete(expenses).where(and(eq(expenses.id, id), eq(expenses.householdId, context.householdId))).returning({ id: expenses.id });
       return deleted.length ? Response.json({ ok: true }) : Response.json({ error: "Gasto não encontrado." }, { status: 404 });
+    }
+    if (type === "income") {
+      const deleted = await db.delete(incomes).where(and(eq(incomes.id, id), eq(incomes.householdId, context.householdId))).returning({ id: incomes.id });
+      return deleted.length ? Response.json({ ok: true }) : Response.json({ error: "Entrada não encontrada." }, { status: 404 });
     }
     if (type === "payment") {
       const [payment] = await db.select({ key: paymentMethods.key }).from(paymentMethods).where(and(eq(paymentMethods.id, id), eq(paymentMethods.householdId, context.householdId))).limit(1);

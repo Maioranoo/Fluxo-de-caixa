@@ -5,6 +5,7 @@ export const households = sqliteTable("households", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
   slug: text("slug").notNull(),
+  allowIncome: integer("allow_income", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, t => [uniqueIndex("idx_households_slug").on(t.slug)]);
 
@@ -49,3 +50,13 @@ export const expenses = sqliteTable("expenses", {
   index("idx_expenses_household_category_date").on(t.householdId, t.categoryId, t.occurredAt),
   index("idx_expenses_household_payment_date").on(t.householdId, t.paymentMethod, t.occurredAt),
 ]);
+
+export const incomes = sqliteTable("incomes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  householdId: integer("household_id").notNull().references(() => households.id),
+  amountCents: integer("amount_cents").notNull(),
+  description: text("description").notNull(),
+  person: text("person").notNull(),
+  occurredAt: text("occurred_at").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, t => [index("idx_incomes_household_date").on(t.householdId, t.occurredAt)]);
