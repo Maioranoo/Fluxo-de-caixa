@@ -52,6 +52,9 @@ test("banco separa famílias e possui índices para as consultas principais", as
   assert.match(schema, /idx_expenses_household_payment_date/);
   assert.match(tenancy, /oai-authenticated-user-id/);
   assert.match(tenancy, /oai-authenticated-user-email/);
+  assert.match(tenancy, /if \(!email\)/);
+  assert.match(tenancy, /userId \? or/);
+  assert.doesNotMatch(tenancy, /if \(!email \|\| !userId\)/);
   assert.match(tenancy, /LOCAL_ADMIN_ENABLED === "true"/);
   assert.match(tenancy, /canAccessHousehold\(isAdmin, member\.householdId, requestedId\)/);
   assert.match(tenancy, /if \(!canAccessHousehold/);

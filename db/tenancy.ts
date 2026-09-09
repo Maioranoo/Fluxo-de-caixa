@@ -29,7 +29,7 @@ export async function requireHousehold(request: Request): Promise<HouseholdConte
   const local = config.LOCAL_ADMIN_ENABLED === "true" && (hostname === "localhost" || hostname === "127.0.0.1");
   const email = request.headers.get("oai-authenticated-user-email")?.trim().toLowerCase() || (local ? "admin-local@localhost" : undefined);
   const userId = request.headers.get("oai-authenticated-user-id")?.trim() || (local ? "admin-local" : undefined);
-  if (!email || !userId) throw new AccessError("Faça login para acessar esta carteira.", 401);
+  if (!email) throw new AccessError("Faça login para acessar esta carteira.", 401);
 
   const db = getDb();
   let [member] = await db.select({
@@ -38,7 +38,7 @@ export async function requireHousehold(request: Request): Promise<HouseholdConte
     householdName: households.name,
     displayName: householdMembers.displayName,
   }).from(householdMembers).innerJoin(households, eq(householdMembers.householdId, households.id))
-    .where(or(eq(householdMembers.userId, userId), eq(householdMembers.email, email))).limit(1);
+    .where(userId ? or(eq(householdMembers.userId, userId), eq(householdMembers.email, email)) : eq(householdMembers.email, email)).limit(1);
 
   if (!member) {
     if (local) await bootstrapLocalHousehold(); else await bootstrapInitialHousehold(email);
@@ -52,7 +52,7 @@ export async function requireHousehold(request: Request): Promise<HouseholdConte
   }
   if (!member) throw new AccessError("Seu e-mail ainda não foi vinculado a uma família.", 403);
 
-  await db.update(householdMembers).set({ userId }).where(eq(householdMembers.id, member.memberId));
+  if (userId) await db.update(householdMembers).set({ userId }).where(eq(householdMembers.id, member.memberId));
   const isAdmin = local || email === config.ADMIN_EMAIL?.trim().toLowerCase();
   const requestedId = Number(request.headers.get("x-household-id"));
   if (requestedId && requestedId !== member.householdId) {
