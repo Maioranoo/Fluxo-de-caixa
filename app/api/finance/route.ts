@@ -2,6 +2,7 @@ import { and, asc, eq, gte, lt } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { AccessError, requireHousehold } from "../../../db/tenancy";
 import { categories, expenses, householdMembers, households, incomes, paymentMethods } from "../../../db/schema";
+import { assertSameSite } from "../security";
 
 export async function GET(request: Request) {
   try {
@@ -16,25 +17,27 @@ export async function GET(request: Request) {
         .where(and(eq(expenses.householdId, context.householdId), gte(expenses.occurredAt, start), lt(expenses.occurredAt, end))).orderBy(asc(expenses.occurredAt), asc(expenses.id)),
       db.select({ id: incomes.id, amountCents: incomes.amountCents, description: incomes.description, person: incomes.person, occurredAt: incomes.occurredAt })
         .from(incomes).where(and(eq(incomes.householdId, context.householdId), gte(incomes.occurredAt, start), lt(incomes.occurredAt, end))).orderBy(asc(incomes.occurredAt), asc(incomes.id)),
-      db.select({ id: householdMembers.id, name: householdMembers.displayName }).from(householdMembers).where(eq(householdMembers.householdId, context.householdId)).orderBy(asc(householdMembers.displayName)),
+      db.select({ id: householdMembers.id, name: householdMembers.displayName, email: householdMembers.email, role: householdMembers.role }).from(householdMembers).where(eq(householdMembers.householdId, context.householdId)).orderBy(asc(householdMembers.displayName)),
       db.select({ id: paymentMethods.id, key: paymentMethods.key, name: paymentMethods.name, isCard: paymentMethods.isCard }).from(paymentMethods).where(eq(paymentMethods.householdId, context.householdId)).orderBy(asc(paymentMethods.name)),
       context.isAdmin ? db.select({ id: households.id, name: households.name, allowIncome: households.allowIncome }).from(households).orderBy(asc(households.name)) : Promise.resolve([]),
       db.select({ allowIncome: households.allowIncome }).from(households).where(eq(households.id, context.householdId)).limit(1),
     ]);
     const allowIncome = currentHouseholdRows[0]?.allowIncome === true;
-    return Response.json({ categories: categoryRows, expenses: expenseRows, incomes: allowIncome ? incomeRows : [], members: memberRows, payments: paymentRows, households: householdRows, household: { id: context.householdId, name: context.householdName, allowIncome }, currentMember: memberRows.some(member => member.name === context.displayName) ? context.displayName : memberRows[0]?.name ?? "", isAdmin: context.isAdmin });
+    const visibleMembers = memberRows.map(member => context.isAdmin ? member : { id: member.id, name: member.name, role: member.role });
+    return Response.json({ categories: categoryRows, expenses: expenseRows, incomes: allowIncome ? incomeRows : [], members: visibleMembers, payments: paymentRows, households: householdRows, household: { id: context.householdId, name: context.householdName, allowIncome }, currentMember: memberRows.some(member => member.name === context.displayName) ? context.displayName : memberRows[0]?.name ?? "", isAdmin: context.isAdmin });
   } catch (error) { return accessResponse(error); }
 }
 
 export async function POST(request: Request) {
   try {
+    assertSameSite(request);
     const context = await requireHousehold(request), body = await request.json() as Record<string, string>, db = getDb();
     if (body.type === "income") {
       const [household] = await db.select({ allowIncome: households.allowIncome }).from(households).where(eq(households.id, context.householdId)).limit(1);
       if (!household?.allowIncome) return Response.json({ error: "Entradas não estão habilitadas para esta família." }, { status: 403 });
       const amountCents = parseMoney(body.amount);
       const allowedPeople = await db.select({ name: householdMembers.displayName }).from(householdMembers).where(eq(householdMembers.householdId, context.householdId));
-      if (!amountCents || !body.description?.trim() || !body.occurredAt || !allowedPeople.some(person => person.name === body.person)) return Response.json({ error: "Preencha todos os campos corretamente." }, { status: 400 });
+      if (!amountCents || !validDescription(body.description) || !validDate(body.occurredAt) || !allowedPeople.some(person => person.name === body.person)) return Response.json({ error: "Preencha todos os campos corretamente." }, { status: 400 });
       const [income] = await db.insert(incomes).values({ householdId: context.householdId, amountCents, description: body.description.trim(), person: body.person, occurredAt: body.occurredAt }).returning({ id: incomes.id, amountCents: incomes.amountCents, description: incomes.description, person: incomes.person, occurredAt: incomes.occurredAt });
       return Response.json({ income }, { status: 201 });
     }
@@ -59,7 +62,7 @@ export async function POST(request: Request) {
     const installmentCount = ownedPayment?.isCard ? Number(body.installments ?? "1") : 1;
     const [ownedCategory] = categoryId ? await db.select({ id: categories.id, name: categories.name }).from(categories).where(and(eq(categories.id, categoryId), eq(categories.householdId, context.householdId))).limit(1) : [];
     const allowedPeople = await db.select({ name: householdMembers.displayName }).from(householdMembers).where(eq(householdMembers.householdId, context.householdId));
-    if (!amountCents || !body.description?.trim() || !ownedCategory || !ownedPayment || !body.occurredAt || !allowedPeople.some(person => person.name === body.person) || !Number.isInteger(installmentCount) || installmentCount < 1 || installmentCount > 60 || installmentCount > amountCents) return Response.json({ error: "Preencha todos os campos corretamente." }, { status: 400 });
+    if (!amountCents || !validDescription(body.description) || !ownedCategory || !ownedPayment || !validDate(body.occurredAt) || !allowedPeople.some(person => person.name === body.person) || !Number.isInteger(installmentCount) || installmentCount < 1 || installmentCount > 60 || installmentCount > amountCents) return Response.json({ error: "Preencha todos os campos corretamente." }, { status: 400 });
     const baseAmount = Math.floor(amountCents / installmentCount), remainder = amountCents % installmentCount;
     const rows = Array.from({ length: installmentCount }, (_, index) => ({ householdId: context.householdId, amountCents: baseAmount + (index < remainder ? 1 : 0), description: installmentCount > 1 ? `${body.description.trim()} (${index + 1}/${installmentCount})` : body.description.trim(), categoryId, paymentMethod: body.paymentMethod, person: body.person, occurredAt: addMonths(body.occurredAt, index) }));
     const created = await db.insert(expenses).values(rows).returning();
@@ -69,13 +72,25 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
+    assertSameSite(request);
     const context = await requireHousehold(request), body = await request.json() as Record<string, string>, db = getDb();
-    if (body.type === "expense_payment") {
-      const id = Number(body.id);
-      const [ownedPayment] = await db.select({ key: paymentMethods.key }).from(paymentMethods).where(and(eq(paymentMethods.key, body.paymentMethod), eq(paymentMethods.householdId, context.householdId))).limit(1);
-      if (!id || !ownedPayment) return Response.json({ error: "Forma de pagamento inválida." }, { status: 400 });
-      const [expense] = await db.update(expenses).set({ paymentMethod: body.paymentMethod }).where(and(eq(expenses.id, id), eq(expenses.householdId, context.householdId))).returning();
-      return expense ? Response.json({ expense }) : Response.json({ error: "Gasto não encontrado." }, { status: 404 });
+    if (body.type === "expense") {
+      const id = Number(body.id), amountCents = parseMoney(body.amount), categoryId = Number(body.categoryId);
+      const [ownedCategory] = categoryId ? await db.select({ id: categories.id, name: categories.name }).from(categories).where(and(eq(categories.id, categoryId), eq(categories.householdId, context.householdId))).limit(1) : [];
+      const [ownedPayment] = body.paymentMethod ? await db.select({ key: paymentMethods.key }).from(paymentMethods).where(and(eq(paymentMethods.key, body.paymentMethod), eq(paymentMethods.householdId, context.householdId))).limit(1) : [];
+      const allowedPeople = await db.select({ name: householdMembers.displayName }).from(householdMembers).where(eq(householdMembers.householdId, context.householdId));
+      if (!id || !amountCents || !validDescription(body.description) || !ownedCategory || !ownedPayment || !validDate(body.occurredAt) || !allowedPeople.some(person => person.name === body.person)) return Response.json({ error: "Preencha todos os campos corretamente." }, { status: 400 });
+      const [expense] = await db.update(expenses).set({ amountCents, description: body.description.trim(), categoryId, paymentMethod: body.paymentMethod, person: body.person, occurredAt: body.occurredAt }).where(and(eq(expenses.id, id), eq(expenses.householdId, context.householdId))).returning();
+      return expense ? Response.json({ expense: { ...expense, category: ownedCategory.name } }) : Response.json({ error: "Gasto não encontrado." }, { status: 404 });
+    }
+    if (body.type === "income") {
+      const id = Number(body.id), amountCents = parseMoney(body.amount);
+      const [household] = await db.select({ allowIncome: households.allowIncome }).from(households).where(eq(households.id, context.householdId)).limit(1);
+      const allowedPeople = await db.select({ name: householdMembers.displayName }).from(householdMembers).where(eq(householdMembers.householdId, context.householdId));
+      if (!household?.allowIncome) return Response.json({ error: "Entradas não estão habilitadas para esta família." }, { status: 403 });
+      if (!id || !amountCents || !validDescription(body.description) || !validDate(body.occurredAt) || !allowedPeople.some(person => person.name === body.person)) return Response.json({ error: "Preencha todos os campos corretamente." }, { status: 400 });
+      const [income] = await db.update(incomes).set({ amountCents, description: body.description.trim(), person: body.person, occurredAt: body.occurredAt }).where(and(eq(incomes.id, id), eq(incomes.householdId, context.householdId))).returning({ id: incomes.id, amountCents: incomes.amountCents, description: incomes.description, person: incomes.person, occurredAt: incomes.occurredAt });
+      return income ? Response.json({ income }) : Response.json({ error: "Entrada não encontrada." }, { status: 404 });
     }
     const id = Number(body.id), name = body.name?.trim();
     if (!["category", "payment"].includes(body.type) || !id || !name) return Response.json({ error: "Informe um nome válido." }, { status: 400 });
@@ -92,6 +107,7 @@ export async function PATCH(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
+    assertSameSite(request);
     const context = await requireHousehold(request), url = new URL(request.url), id = Number(url.searchParams.get("id")), type = url.searchParams.get("type"), db = getDb();
     if (!id || !["expense", "income", "category", "payment"].includes(type ?? "")) return Response.json({ error: "Solicitação inválida." }, { status: 400 });
     if (type === "expense") {
@@ -119,5 +135,7 @@ export async function DELETE(request: Request) {
 
 function accessResponse(error: unknown) { if (error instanceof AccessError) return Response.json({ error: error.message }, { status: error.status }); console.error(error); return Response.json({ error: "Não foi possível acessar os dados agora." }, { status: 500 }); }
 function parseMoney(value = "") { const cleaned = value.replace(/R\$\s?/i, "").trim(); const normalized = cleaned.includes(",") ? cleaned.replace(/\./g, "").replace(",", ".") : cleaned; const n = Number(normalized); return Number.isFinite(n) && n > 0 ? Math.round(n * 100) : null; }
+function validDescription(value = "") { const description = value.trim(); return description.length > 0 && description.length <= 160; }
+function validDate(value = "") { if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false; const [year, month, day] = value.split("-").map(Number), date = new Date(Date.UTC(year, month - 1, day)); return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day; }
 function nextMonth(month: string) { const [year, m] = month.split("-").map(Number); const d = new Date(year, m, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`; }
 function addMonths(date: string, offset: number) { const [year, month, day] = date.split("-").map(Number); const first = new Date(Date.UTC(year, month - 1 + offset, 1)); const lastDay = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate(); return `${first.getUTCFullYear()}-${String(first.getUTCMonth() + 1).padStart(2, "0")}-${String(Math.min(day, lastDay)).padStart(2, "0")}`; }

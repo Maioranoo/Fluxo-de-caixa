@@ -34,9 +34,9 @@ test("painel financeiro possui os fluxos essenciais", async () => {
   assert.match(api, /addMonths\(body\.occurredAt, index\)/);
   assert.match(api, /Math\.floor\(amountCents \/ installmentCount\)/);
   assert.match(api, /\$\{index \+ 1\}\/\$\{installmentCount\}/);
-  assert.match(page, /onPaymentChange={updateExpensePayment}/);
-  assert.match(page, /className="table-payment"/);
-  assert.match(api, /body\.type === "expense_payment"/);
+  assert.doesNotMatch(page, /onPaymentChange={updateExpensePayment}/);
+  assert.doesNotMatch(page, /className="table-payment"/);
+  assert.match(page, /paymentName\(e\.paymentMethod\)/);
   assert.match(api, /eq\(paymentMethods\.householdId, context\.householdId\)/);
   assert.match(api, /eq\(expenses\.householdId, context\.householdId\)/);
   assert.match(api, /eq\(categories\.householdId, context\.householdId\)/);
@@ -100,4 +100,46 @@ test("entradas são opcionais e permanecem isoladas por família", async () => {
   assert.ok((api.match(/eq\(incomes\.householdId, context\.householdId\)/g) ?? []).length >= 2);
   assert.match(admin, /if \(!context\.isAdmin\)/);
   assert.match(admin, /typeof body\.allowIncome !== "boolean"/);
+});
+
+test("edição completa permanece restrita à carteira atual", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const api = await readFile(new URL("../app/api/finance/route.ts", import.meta.url), "utf8");
+  assert.match(page, /Editar gasto/);
+  assert.match(page, /Editar entrada/);
+  assert.match(page, /type: "expense", \.\.\.expenseEdit/);
+  assert.match(page, /type: "income", \.\.\.incomeEdit/);
+  assert.match(api, /body\.type === "expense"/);
+  assert.match(api, /body\.type === "income"/);
+  assert.match(api, /validDate\(body\.occurredAt\)/);
+  assert.match(api, /eq\(expenses\.householdId, context\.householdId\)/);
+  assert.match(api, /eq\(incomes\.householdId, context\.householdId\)/);
+});
+
+test("integrantes só podem ser gerenciados pelo administrador na carteira selecionada", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const admin = await readFile(new URL("../app/api/admin/households/route.ts", import.meta.url), "utf8");
+  assert.match(page, /Integrantes de/);
+  assert.match(page, /type: "member"/);
+  assert.match(admin, /body\.type === "member"/);
+  assert.match(admin, /eq\(householdMembers\.householdId, context\.householdId\)/);
+  assert.match(admin, /O acesso do administrador não pode ser removido/);
+  assert.match(admin, /O e-mail do administrador não pode ser alterado aqui/);
+  assert.match(admin, /A família precisa ter pelo menos um integrante/);
+});
+
+test("privacidade, data local e salvamento protegido estão ativos", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const api = await readFile(new URL("../app/api/finance/route.ts", import.meta.url), "utf8");
+  const security = await readFile(new URL("../app/api/security.ts", import.meta.url), "utf8");
+  assert.match(api, /context\.isAdmin \? member/);
+  assert.match(page, /date\.getFullYear\(\)/);
+  assert.doesNotMatch(page, /toISOString\(\)\.slice\(0, 10\)/);
+  assert.match(page, /if \(savingExpense\) return/);
+  assert.match(page, /if \(savingIncome\) return/);
+  assert.match(page, /disabled={savingExpense}/);
+  assert.match(page, /disabled={savingIncome}/);
+  assert.match(page, /temporaryIds\.has/);
+  assert.match(security, /sec-fetch-site/);
+  assert.match(security, /cross-site/);
 });
