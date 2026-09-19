@@ -256,7 +256,7 @@ export default function Home() {
       <div className="side-note"><b>{data.isAdmin ? "Acesso de administrador" : "Carteira compartilhada"}</b>{data.isAdmin && data.households.length ? <select aria-label="Selecionar carteira" value={selectedHousehold} onChange={event=>setSelectedHousehold(event.target.value)}>{data.households.map(household=><option key={household.id} value={household.id}>{household.name}</option>)}</select> : <span>{data.household?.name ?? "Sua família"}</span>}{data.isAdmin && <button className={tab === "admin" ? "admin-link active" : "admin-link"} onClick={()=>setTab("admin")}>⚙ Painel adm</button>}</div>
     </aside>
     <main>
-      <header><div><p>CONTROLE FAMILIAR</p><h1>{tabTitle(tab)}</h1></div><div className="month-picker"><span>Mês</span><button className="month-trigger" type="button" onClick={()=>{setMonthDraft(month);setShowMonthPicker(true)}} aria-haspopup="dialog"><b>{monthNames[Number(month.split("-")[1])-1]} de {month.split("-")[0]}</b><i aria-hidden="true">▣</i></button></div></header>
+      <header><div><p>CONTROLE FAMILIAR</p><h1>{tabTitle(tab)}</h1></div><div className="month-picker"><span>Mês</span><button className="month-trigger" type="button" onClick={()=>{setMonthDraft(month);setShowMonthPicker(true)}} aria-haspopup="dialog"><b>{monthNames[Number(month.split("-")[1])-1]} de {month.split("-")[0]}</b></button></div></header>
       {notice && <button className="notice" onClick={() => setNotice("")}>{notice}<span>×</span></button>}
       {loading ? <div className="loading">Carregando seus dados…</div> : <>
         {tab === "resumo" && <section>
