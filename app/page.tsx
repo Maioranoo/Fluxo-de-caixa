@@ -17,6 +17,7 @@ const today = () => { const date = new Date(); return `${date.getFullYear()}-${S
 export default function Home() {
   const [tab, setTab] = useState("resumo");
   const [month, setMonth] = useState(monthKey());
+  const [monthDraft, setMonthDraft] = useState(monthKey());
   const [data, setData] = useState<Data>({ categories: [], expenses: [], incomes: [], members: [], payments: [], households: [], household: null, currentMember: "", isAdmin: false });
   const [selectedHousehold, setSelectedHousehold] = useState("");
   const [loading, setLoading] = useState(true);
@@ -235,6 +236,12 @@ export default function Home() {
     setAdminForm(current => ({ ...current, members: current.members.map((member, memberIndex) => memberIndex === index ? { ...member, [field]: value } : member) }));
   }
 
+  function applyMonth(event:React.FormEvent) {
+    event.preventDefault();
+    if (!/^\d{4}-\d{2}$/.test(monthDraft) || monthDraft > "2200-12") return setNotice("Selecione um mês até dezembro de 2200.");
+    setMonth(monthDraft);
+  }
+
   const monthLabel = new Date(`${month}-02T12:00:00`).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
   const navigationItems = [["resumo","⌂","Resumo"],["novo","＋","Novo gasto"],["gastos","≡","Gastos"],...(data.household?.allowIncome ? [["entradas","↙","Entradas"]] : []),["categorias","◇","Categorias"],["relatorio","▤","Relatório"]];
   const mobilePrimaryItems = data.household?.allowIncome ? [["resumo","⌂","Resumo"],["gastos","≡","Gastos"],["novo","＋","Novo"],["entradas","↙","Entradas"],["relatorio","▤","Relatório"]] : [["resumo","⌂","Resumo"],["gastos","≡","Gastos"],["novo","＋","Novo"],["categorias","◇","Categorias"],["relatorio","▤","Relatório"]];
@@ -248,7 +255,7 @@ export default function Home() {
       <div className="side-note"><b>{data.isAdmin ? "Acesso de administrador" : "Carteira compartilhada"}</b>{data.isAdmin && data.households.length ? <select aria-label="Selecionar carteira" value={selectedHousehold} onChange={event=>setSelectedHousehold(event.target.value)}>{data.households.map(household=><option key={household.id} value={household.id}>{household.name}</option>)}</select> : <span>{data.household?.name ?? "Sua família"}</span>}{data.isAdmin && <button className={tab === "admin" ? "admin-link active" : "admin-link"} onClick={()=>setTab("admin")}>⚙ Painel adm</button>}</div>
     </aside>
     <main>
-      <header><div><p>CONTROLE FAMILIAR</p><h1>{tabTitle(tab)}</h1></div><label className="month-picker">Mês<input type="month" value={month} onChange={e => setMonth(e.target.value)} /></label></header>
+      <header><div><p>CONTROLE FAMILIAR</p><h1>{tabTitle(tab)}</h1></div><form className="month-picker" onSubmit={applyMonth}><label htmlFor="finance-month">Mês</label><div><input id="finance-month" type="month" min="2000-01" max="2200-12" value={monthDraft} onChange={e => setMonthDraft(e.target.value)} /><button type="submit" aria-label="Aplicar mês" title="Aplicar mês" disabled={!monthDraft || monthDraft === month}>✓</button></div></form></header>
       {notice && <button className="notice" onClick={() => setNotice("")}>{notice}<span>×</span></button>}
       {loading ? <div className="loading">Carregando seus dados…</div> : <>
         {tab === "resumo" && <section>
