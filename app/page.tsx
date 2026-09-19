@@ -13,11 +13,13 @@ type Data = { categories: Category[]; expenses: Expense[]; incomes: Income[]; me
 const money = (cents: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cents / 100);
 const monthKey = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
 const today = () => { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`; };
+const monthNames = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
 
 export default function Home() {
   const [tab, setTab] = useState("resumo");
   const [month, setMonth] = useState(monthKey());
   const [monthDraft, setMonthDraft] = useState(monthKey());
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [data, setData] = useState<Data>({ categories: [], expenses: [], incomes: [], members: [], payments: [], households: [], household: null, currentMember: "", isAdmin: false });
   const [selectedHousehold, setSelectedHousehold] = useState("");
   const [loading, setLoading] = useState(true);
@@ -236,10 +238,9 @@ export default function Home() {
     setAdminForm(current => ({ ...current, members: current.members.map((member, memberIndex) => memberIndex === index ? { ...member, [field]: value } : member) }));
   }
 
-  function applyMonth(event:React.FormEvent) {
-    event.preventDefault();
+  function applyMonth() {
     if (!/^\d{4}-\d{2}$/.test(monthDraft) || monthDraft > "2200-12") return setNotice("Selecione um mês até dezembro de 2200.");
-    setMonth(monthDraft);
+    setMonth(monthDraft); setShowMonthPicker(false);
   }
 
   const monthLabel = new Date(`${month}-02T12:00:00`).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
@@ -255,7 +256,7 @@ export default function Home() {
       <div className="side-note"><b>{data.isAdmin ? "Acesso de administrador" : "Carteira compartilhada"}</b>{data.isAdmin && data.households.length ? <select aria-label="Selecionar carteira" value={selectedHousehold} onChange={event=>setSelectedHousehold(event.target.value)}>{data.households.map(household=><option key={household.id} value={household.id}>{household.name}</option>)}</select> : <span>{data.household?.name ?? "Sua família"}</span>}{data.isAdmin && <button className={tab === "admin" ? "admin-link active" : "admin-link"} onClick={()=>setTab("admin")}>⚙ Painel adm</button>}</div>
     </aside>
     <main>
-      <header><div><p>CONTROLE FAMILIAR</p><h1>{tabTitle(tab)}</h1></div><form className="month-picker" onSubmit={applyMonth}><label htmlFor="finance-month">Mês</label><div><input id="finance-month" type="month" min="2000-01" max="2200-12" value={monthDraft} onChange={e => setMonthDraft(e.target.value)} /><button type="submit" aria-label="Aplicar mês" title="Aplicar mês" disabled={!monthDraft || monthDraft === month}>✓</button></div></form></header>
+      <header><div><p>CONTROLE FAMILIAR</p><h1>{tabTitle(tab)}</h1></div><div className="month-picker"><span>Mês</span><button className="month-trigger" type="button" onClick={()=>{setMonthDraft(month);setShowMonthPicker(true)}} aria-haspopup="dialog"><b>{monthNames[Number(month.split("-")[1])-1]} de {month.split("-")[0]}</b><i aria-hidden="true">▣</i></button></div></header>
       {notice && <button className="notice" onClick={() => setNotice("")}>{notice}<span>×</span></button>}
       {loading ? <div className="loading">Carregando seus dados…</div> : <>
         {tab === "resumo" && <section>
@@ -282,6 +283,7 @@ export default function Home() {
       </>}
     </main>
     <nav className="mobile-bottom-nav" aria-label="Navegação principal">{mobilePrimaryItems.map(([id,icon,label])=><button key={id} type="button" className={`${tab===id?"active":""} ${id==="novo"?"main-action":""}`} aria-current={tab===id?"page":undefined} onClick={()=>openTab(id)}><i>{icon}</i><span>{label}</span></button>)}</nav>
+    {showMonthPicker&&<div className="month-modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)setShowMonthPicker(false)}}><section className="month-modal" role="dialog" aria-modal="true" aria-labelledby="month-modal-title"><div className="month-modal-head"><div><small>PERÍODO</small><h2 id="month-modal-title">Selecionar mês</h2></div><button type="button" aria-label="Fechar seletor" onClick={()=>setShowMonthPicker(false)}>×</button></div><div className="month-modal-fields"><label>Mês<select value={monthDraft.split("-")[1]} onChange={event=>setMonthDraft(`${monthDraft.split("-")[0]}-${event.target.value}`)}>{monthNames.map((name,index)=><option key={name} value={String(index+1).padStart(2,"0")}>{name}</option>)}</select></label><label>Ano<select value={monthDraft.split("-")[0]} onChange={event=>setMonthDraft(`${event.target.value}-${monthDraft.split("-")[1]}`)}>{Array.from({length:201},(_,index)=>2200-index).map(year=><option key={year} value={year}>{year}</option>)}</select></label></div><div className="month-modal-actions"><button type="button" className="month-reset" onClick={()=>setMonthDraft(monthKey())}>Hoje</button><button type="button" className="month-confirm" aria-label="Confirmar mês selecionado" onClick={applyMonth}>✓</button></div></section></div>}
     {expenseEdit.id > 0 && <div className="modal-backdrop"><section className="edit-modal" role="dialog" aria-modal="true" aria-labelledby="expense-edit-title"><h2 id="expense-edit-title">Editar gasto</h2><form className="form" onSubmit={updateExpense}><label>Valor (R$)<input autoFocus inputMode="decimal" value={expenseEdit.amount} onChange={event=>setExpenseEdit({...expenseEdit,amount:event.target.value})} required/></label><label className="wide">Onde foi gasto?<input value={expenseEdit.description} onChange={event=>setExpenseEdit({...expenseEdit,description:event.target.value})} required/></label><label>Categoria<select value={expenseEdit.categoryId} onChange={event=>setExpenseEdit({...expenseEdit,categoryId:event.target.value})} required>{data.categories.map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select></label><label>Pagamento<select value={expenseEdit.paymentMethod} onChange={event=>setExpenseEdit({...expenseEdit,paymentMethod:event.target.value})} required>{payments.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label><label>Quem lançou?<select value={expenseEdit.person} onChange={event=>setExpenseEdit({...expenseEdit,person:event.target.value})} required>{data.members.map(member=><option key={member.id} value={member.name}>{member.name}</option>)}</select></label><label>Data<input type="date" value={expenseEdit.occurredAt} onChange={event=>setExpenseEdit({...expenseEdit,occurredAt:event.target.value})} required/></label><div className="modal-actions wide"><button className="secondary" type="button" onClick={()=>setExpenseEdit(current=>({...current,id:0}))}>Cancelar</button><button className="primary" type="submit">Salvar gasto</button></div></form></section></div>}
     {incomeEdit.id > 0 && <div className="modal-backdrop"><section className="edit-modal" role="dialog" aria-modal="true" aria-labelledby="income-edit-title"><h2 id="income-edit-title">Editar entrada</h2><form className="income-form" onSubmit={updateIncome}><label>Valor (R$)<input autoFocus inputMode="decimal" value={incomeEdit.amount} onChange={event=>setIncomeEdit({...incomeEdit,amount:event.target.value})} required/></label><label>Descrição<input value={incomeEdit.description} onChange={event=>setIncomeEdit({...incomeEdit,description:event.target.value})} required/></label><label>Quem lançou?<select value={incomeEdit.person} onChange={event=>setIncomeEdit({...incomeEdit,person:event.target.value})} required>{data.members.map(member=><option key={member.id} value={member.name}>{member.name}</option>)}</select></label><label>Data<input type="date" value={incomeEdit.occurredAt} onChange={event=>setIncomeEdit({...incomeEdit,occurredAt:event.target.value})} required/></label><div className="modal-actions"><button className="secondary" type="button" onClick={()=>setIncomeEdit(current=>({...current,id:0}))}>Cancelar</button><button className="primary" type="submit">Salvar entrada</button></div></form></section></div>}
   </div>;
