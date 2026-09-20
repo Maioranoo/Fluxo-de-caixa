@@ -24,7 +24,7 @@ export async function GET(request: Request) {
     ]);
     const allowIncome = currentHouseholdRows[0]?.allowIncome === true;
     const visibleMembers = memberRows.map(member => context.isAdmin ? member : { id: member.id, name: member.name, role: member.role });
-    return Response.json({ categories: categoryRows, expenses: expenseRows, incomes: allowIncome ? incomeRows : [], members: visibleMembers, payments: paymentRows, households: householdRows, household: { id: context.householdId, name: context.householdName, allowIncome }, currentMember: memberRows.some(member => member.name === context.displayName) ? context.displayName : memberRows[0]?.name ?? "", isAdmin: context.isAdmin });
+    return Response.json({ categories: allowIncome ? categoryRows : categoryRows.filter(category => category.kind === "expense"), expenses: expenseRows, incomes: allowIncome ? incomeRows : [], members: visibleMembers, payments: paymentRows, households: householdRows, household: { id: context.householdId, name: context.householdName, allowIncome }, currentMember: memberRows.some(member => member.name === context.displayName) ? context.displayName : memberRows[0]?.name ?? "", isAdmin: context.isAdmin });
   } catch (error) { return accessResponse(error); }
 }
 
@@ -45,6 +45,8 @@ export async function POST(request: Request) {
     if (body.type === "category") {
       const name = body.name?.trim(), kind = body.kind;
       if (!name || !["expense", "income"].includes(kind)) return Response.json({ error: "Informe o nome e o tipo da categoria." }, { status: 400 });
+      const [household] = await db.select({ allowIncome: households.allowIncome }).from(households).where(eq(households.id, context.householdId)).limit(1);
+      if (kind === "income" && !household?.allowIncome) return Response.json({ error: "Categorias de entrada não estão disponíveis para esta carteira." }, { status: 403 });
       try {
         const [category] = await db.insert(categories).values({ householdId: context.householdId, name, kind }).returning({ id: categories.id, name: categories.name, kind: categories.kind });
         return Response.json({ category }, { status: 201 });
@@ -103,6 +105,8 @@ export async function PATCH(request: Request) {
       }
       const kind = body.kind;
       if (!["expense", "income"].includes(kind)) return Response.json({ error: "Selecione onde a categoria será usada." }, { status: 400 });
+      const [household] = await db.select({ allowIncome: households.allowIncome }).from(households).where(eq(households.id, context.householdId)).limit(1);
+      if (kind === "income" && !household?.allowIncome) return Response.json({ error: "Categorias de entrada não estão disponíveis para esta carteira." }, { status: 403 });
       const [currentCategory] = await db.select({ kind: categories.kind }).from(categories).where(and(eq(categories.id, id), eq(categories.householdId, context.householdId))).limit(1);
       if (!currentCategory) return Response.json({ error: "Categoria não encontrada." }, { status: 404 });
       if (currentCategory.kind !== kind) {
