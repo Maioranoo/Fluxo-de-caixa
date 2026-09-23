@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 
 test("painel financeiro possui os fluxos essenciais", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const transactions = await readFile(new URL("../app/components/transactions.tsx", import.meta.url), "utf8");
+  const source = `${page}\n${transactions}`;
   assert.match(page, /Adicionar gasto/);
   assert.match(page, /Adicionar forma de pagamento/);
   assert.match(page, /className="add-inline"/);
@@ -17,10 +19,9 @@ test("painel financeiro possui os fluxos essenciais", async () => {
   assert.doesNotMatch(page, /\["dinheiro",/);
   assert.doesNotMatch(page, /\["credito",/);
   assert.doesNotMatch(page, /\["debito",/);
-  assert.match(page, /aria-label={`Editar/);
-  assert.match(page, /aria-label={`Excluir/);
-  assert.match(page, />✎<\/button>/);
-  assert.match(page, />🗑<\/button>/);
+  assert.match(source, /label={`Editar/);
+  assert.match(source, /label={`Excluir/);
+  assert.doesNotMatch(source, />✎<\/button>|>🗑<\/button>/);
   assert.match(page, /method: "PATCH"/);
   assert.match(page, /Filtrar por categoria/);
   assert.match(page, /Filtrar por pagamento/);
@@ -38,7 +39,7 @@ test("painel financeiro possui os fluxos essenciais", async () => {
   assert.match(api, /\$\{index \+ 1\}\/\$\{installmentCount\}/);
   assert.doesNotMatch(page, /onPaymentChange={updateExpensePayment}/);
   assert.doesNotMatch(page, /className="table-payment"/);
-  assert.match(page, /paymentName\(e\.paymentMethod\)/);
+  assert.match(source, /paymentName\(expense\.paymentMethod\)/);
   assert.match(api, /eq\(paymentMethods\.householdId, context\.householdId\)/);
   assert.match(api, /eq\(expenses\.householdId, context\.householdId\)/);
   assert.match(api, /eq\(categories\.householdId, context\.householdId\)/);
@@ -87,6 +88,7 @@ test("painel administrativo exige autorização no servidor", async () => {
 
 test("entradas são opcionais e permanecem isoladas por família", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const summary = await readFile(new URL("../app/components/finance-summary.tsx", import.meta.url), "utf8");
   const api = await readFile(new URL("../app/api/finance/route.ts", import.meta.url), "utf8");
   const admin = await readFile(new URL("../app/api/admin/households/route.ts", import.meta.url), "utf8");
   const schema = await readFile(new URL("../db/schema.ts", import.meta.url), "utf8");
@@ -94,10 +96,10 @@ test("entradas são opcionais e permanecem isoladas por família", async () => {
   assert.match(schema, /idx_incomes_household_date/);
   assert.match(page, /Permitir entrada e saída de dinheiro/);
   assert.match(page, /data\.household\?\.allowIncome/);
-  assert.match(page, /SALDO EM/);
-  assert.match(page, /TOTAL DE GASTOS EM/);
-  assert.match(page, /TOTAL DE ENTRADAS EM/);
-  assert.match(page, /balance < 0 \? "negative" : "positive"/);
+  assert.match(summary, /Saldo em/);
+  assert.match(summary, /Gastos/);
+  assert.match(summary, /Entradas/);
+  assert.match(summary, /balance < 0 \? "negative" : "positive"/);
   assert.match(api, /Entradas não estão habilitadas para esta família/);
   assert.ok((api.match(/eq\(incomes\.householdId, context\.householdId\)/g) ?? []).length >= 2);
   assert.match(admin, /if \(!context\.isAdmin\)/);
@@ -158,5 +160,23 @@ test("impressão do relatório restaura a tabela de desktop depois das regras mo
   assert.match(printCss, /\.table-wrap tr\{display:table-row!important/);
   assert.match(printCss, /\.table-wrap td\{display:table-cell!important/);
   assert.match(printCss, /\.table-wrap td:before\{display:none!important/);
-  assert.match(printCss, /\.mobile-bottom-nav,.mobile-quick-actions\{display:none!important/);
+  assert.match(printCss, /\.app-sidebar,.app-header,.mobile-bottom-nav,.mobile-quick-actions.*\{display:none!important/);
+});
+
+test("redesign mantém navegação, foco, redução de movimento e componentes sem emoji", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const shell = await readFile(new URL("../app/components/app-shell.tsx", import.meta.url), "utf8");
+  const icons = await readFile(new URL("../app/components/icons.tsx", import.meta.url), "utf8");
+  const ui = await readFile(new URL("../app/components/ui.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(page, /href="#main-content"/);
+  assert.match(page, /id="main-content"/);
+  assert.match(shell, /aria-current=/);
+  assert.match(icons, /export type IconName/);
+  assert.match(icons, /aria-hidden/);
+  assert.match(ui, /role="dialog"/);
+  assert.match(ui, /event\.key === "Escape"/);
+  assert.match(css, /:focus-visible/);
+  assert.match(css, /prefers-reduced-motion:reduce/);
+  assert.doesNotMatch(`${page}\n${shell}\n${ui}`, /✎|🗑|⚙/);
 });

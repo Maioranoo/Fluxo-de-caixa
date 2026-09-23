@@ -45,3 +45,5 @@ next-env.d.ts
 /work/
 /site-build.tar.gz
 .site-package-stage/
+/.superpowers/
+/.impeccable/engine/

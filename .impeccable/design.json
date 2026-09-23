@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "direction": "Banco familiar sereno",
+  "tokens": {
+    "colors": {
+      "canvas": "#f4f1e9",
+      "surface": "#fafbf9",
+      "surfaceRaised": "#ffffff",
+      "ink": "#17231f",
+      "muted": "#68766f",
+      "border": "#dbe3de",
+      "primary": "#176a52",
+      "primaryHover": "#11523f",
+      "primarySoft": "#e1f0e8",
+      "danger": "#a9453b",
+      "dangerSoft": "#fae9e6"
+    },
+    "radius": { "small": "9px", "medium": "14px", "large": "20px" },
+    "motion": { "fast": "160ms", "base": "210ms", "easing": "cubic-bezier(.2,.8,.2,1)" },
+    "layout": { "sidebar": "248px", "mobileBreakpoint": "800px", "compactGridBreakpoint": "1100px" }
+  },
+  "principles": ["financial hierarchy", "restrained surfaces", "semantic color", "keyboard access", "structural responsiveness", "print isolation"]
+}
