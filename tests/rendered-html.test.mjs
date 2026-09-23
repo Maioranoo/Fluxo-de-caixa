@@ -34,7 +34,7 @@ test("painel financeiro possui os fluxos essenciais", async () => {
   assert.match(page, /Número de parcelas/);
   assert.match(page, /installments/);
   const api = await readFile(new URL("../app/api/finance/route.ts", import.meta.url), "utf8");
-  assert.match(api, /addMonths\(body\.occurredAt, index\)/);
+  assert.match(api, /addMonths\(body\.occurredAt as string, index\)/);
   assert.match(api, /Math\.floor\(amountCents \/ installmentCount\)/);
   assert.match(api, /\$\{index \+ 1\}\/\$\{installmentCount\}/);
   assert.doesNotMatch(page, /onPaymentChange={updateExpensePayment}/);
@@ -115,7 +115,7 @@ test("edição completa permanece restrita à carteira atual", async () => {
   assert.match(page, /type: "income", \.\.\.incomeEdit/);
   assert.match(api, /body\.type === "expense"/);
   assert.match(api, /body\.type === "income"/);
-  assert.match(api, /validDate\(body\.occurredAt\)/);
+  assert.match(api, /isValidDateInput\(body\.occurredAt\)/);
   assert.match(api, /eq\(expenses\.householdId, context\.householdId\)/);
   assert.match(api, /eq\(incomes\.householdId, context\.householdId\)/);
 });

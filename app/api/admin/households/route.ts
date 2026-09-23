@@ -2,6 +2,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { AccessError, requireHousehold } from "../../../../db/tenancy";
 import { householdMembers, households } from "../../../../db/schema";
+import { MAX_MEMBERS, normalizeEmail, normalizeName, parsePositiveSafeInteger, validateMembers } from "../../../lib/validation";
 import { assertSameSite } from "../../security";
 
 type NewMember = { name?: string; email?: string };
@@ -20,15 +21,21 @@ export async function POST(request: Request) {
     const context = await requireAdmin(request);
     const body = await request.json() as { type?: string; name?: string; email?: string; members?: NewMember[]; allowIncome?: boolean };
     if (body.type === "member") {
+      const memberCount = await getDb().select({ id: householdMembers.id }).from(householdMembers).where(eq(householdMembers.householdId, context.householdId));
+      if (memberCount.length >= MAX_MEMBERS) return Response.json({ error: `Uma família pode ter no máximo ${MAX_MEMBERS} integrantes.` }, { status: 400 });
       const member = normalizeMember(body);
-      if (!member) return Response.json({ error: "Informe um nome e um e-mail válidos." }, { status: 400 });
+      if (!member) return Response.json({ error: "O nome deve conter letras e ter até 80 caracteres; informe também um email válido." }, { status: 400 });
       try {
         const [created] = await getDb().insert(householdMembers).values({ householdId: context.householdId, email: member.email, displayName: member.name, role: "member" }).returning({ id: householdMembers.id, name: householdMembers.displayName, email: householdMembers.email, role: householdMembers.role });
         return Response.json({ member: created }, { status: 201 });
       } catch { return Response.json({ error: "Este e-mail já pertence a uma família." }, { status: 409 }); }
     }
-    const name = body.name?.trim(), members = normalizeMembers(body.members);
-    if (!name || !members.length) return Response.json({ error: "Informe o nome da família e pelo menos um integrante." }, { status: 400 });
+    if (body.type !== undefined) return Response.json({ error: "Tipo de cadastro inválido." }, { status: 400 });
+    const name = normalizeName(body.name), memberValidation = validateMembers(body.members);
+    if (!name) return Response.json({ error: "O nome da família deve conter letras e ter no máximo 80 caracteres." }, { status: 400 });
+    if (!memberValidation.ok) return Response.json({ error: memberValidation.error }, { status: 400 });
+    if (typeof body.allowIncome !== "boolean") return Response.json({ error: "Selecione uma configuração válida para entradas." }, { status: 400 });
+    const members = memberValidation.members;
     const db = getDb(), emails = members.map(member => member.email);
     const existing = await db.select({ email: householdMembers.email }).from(householdMembers).where(inArray(householdMembers.email, emails));
     if (existing.length) return Response.json({ error: `Este e-mail já pertence a uma família: ${existing[0].email}` }, { status: 409 });
@@ -49,8 +56,8 @@ export async function PATCH(request: Request) {
     const context = await requireAdmin(request);
     const body = await request.json() as { type?: string; id?: number; name?: string; email?: string; householdId?: number; allowIncome?: boolean };
     if (body.type === "member") {
-      const id = Number(body.id), member = normalizeMember(body), db = getDb();
-      if (!id || !member) return Response.json({ error: "Informe um nome e um e-mail válidos." }, { status: 400 });
+      const id = parsePositiveSafeInteger(body.id), member = normalizeMember(body), db = getDb();
+      if (!id || !member) return Response.json({ error: "O nome deve conter letras e ter até 80 caracteres; informe também um email válido." }, { status: 400 });
       const [existing] = await db.select({ email: householdMembers.email }).from(householdMembers).where(and(eq(householdMembers.id, id), eq(householdMembers.householdId, context.householdId))).limit(1);
       if (!existing) return Response.json({ error: "Integrante não encontrado." }, { status: 404 });
       if (existing.email === context.email && member.email !== context.email) return Response.json({ error: "O e-mail do administrador não pode ser alterado aqui." }, { status: 400 });
@@ -59,7 +66,8 @@ export async function PATCH(request: Request) {
         return Response.json({ member: updated });
       } catch { return Response.json({ error: "Este e-mail já pertence a uma família." }, { status: 409 }); }
     }
-    const householdId = Number(body.householdId);
+    if (body.type !== undefined) return Response.json({ error: "Tipo de alteração inválido." }, { status: 400 });
+    const householdId = parsePositiveSafeInteger(body.householdId);
     if (!householdId || typeof body.allowIncome !== "boolean") return Response.json({ error: "Configuração inválida." }, { status: 400 });
     const db = getDb();
     const [household] = await db.update(households).set({ allowIncome: body.allowIncome }).where(eq(households.id, householdId)).returning({ id: households.id, name: households.name, allowIncome: households.allowIncome });
@@ -70,7 +78,7 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   try {
     assertSameSite(request);
-    const context = await requireAdmin(request), url = new URL(request.url), id = Number(url.searchParams.get("id")), db = getDb();
+    const context = await requireAdmin(request), url = new URL(request.url), id = parsePositiveSafeInteger(url.searchParams.get("id")), db = getDb();
     if (!id || url.searchParams.get("type") !== "member") return Response.json({ error: "Solicitação inválida." }, { status: 400 });
     const rows = await db.select({ id: householdMembers.id, email: householdMembers.email }).from(householdMembers).where(eq(householdMembers.householdId, context.householdId));
     const member = rows.find(item => item.id === id);
@@ -88,15 +96,9 @@ async function requireAdmin(request: Request) {
   return context;
 }
 
-function normalizeMembers(input?: NewMember[]) {
-  const seen = new Set<string>();
-  return (input ?? []).map(member => ({ name: member.name?.trim() ?? "", email: member.email?.trim().toLowerCase() ?? "" }))
-    .filter(member => member.name && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(member.email) && !seen.has(member.email) && seen.add(member.email));
-}
-
 function normalizeMember(input: NewMember) {
-  const name = input.name?.trim() ?? "", email = input.email?.trim().toLowerCase() ?? "";
-  return name && name.length <= 80 && email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? { name, email } : null;
+  const name = normalizeName(input.name), email = normalizeEmail(input.email);
+  return name && email ? { name, email } : null;
 }
 
 function errorResponse(error: unknown) {

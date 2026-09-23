@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { eq, isNull, or } from "drizzle-orm";
 import { getDb } from ".";
 import { categories, expenses, householdMembers, households, paymentMethods } from "./schema";
+import { parsePositiveSafeInteger } from "../app/lib/validation";
 
 type RuntimeConfig = {
   INITIAL_HOUSEHOLD_NAME?: string;
@@ -54,7 +55,7 @@ export async function requireHousehold(request: Request): Promise<HouseholdConte
 
   if (userId) await db.update(householdMembers).set({ userId }).where(eq(householdMembers.id, member.memberId));
   const isAdmin = local || email === config.ADMIN_EMAIL?.trim().toLowerCase();
-  const requestedId = Number(request.headers.get("x-household-id"));
+  const requestedId = parsePositiveSafeInteger(request.headers.get("x-household-id"));
   if (requestedId && requestedId !== member.householdId) {
     if (!canAccessHousehold(isAdmin, member.householdId, requestedId)) throw new AccessError("Você não tem acesso a esta família.", 403);
     const [requested] = await db.select({ id: households.id, name: households.name }).from(households).where(eq(households.id, requestedId)).limit(1);
