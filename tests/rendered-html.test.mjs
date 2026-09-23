@@ -158,4 +158,5 @@ test("impressão do relatório restaura a tabela de desktop depois das regras mo
   assert.match(printCss, /\.table-wrap tr\{display:table-row!important/);
   assert.match(printCss, /\.table-wrap td\{display:table-cell!important/);
   assert.match(printCss, /\.table-wrap td:before\{display:none!important/);
+  assert.match(printCss, /\.mobile-bottom-nav,.mobile-quick-actions\{display:none!important/);
 });
