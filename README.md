@@ -1,100 +1,157 @@
-# vinext-starter
+# Finanças da Família
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+Aplicação web para organizar o fluxo financeiro de diferentes famílias em ambientes separados. O sistema reúne lançamentos, indicadores mensais, categorias, formas de pagamento e relatórios em uma interface responsiva.
 
-## Prerequisites
+![Next.js](https://img.shields.io/badge/Next.js-16-000000?style=flat-square&logo=nextdotjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![Cloudflare](https://img.shields.io/badge/Cloudflare-Workers%20%2B%20D1-F38020?style=flat-square&logo=cloudflare&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=101010)
 
-- Node.js `>=22.13.0`
+## Preview
 
-## Quick Start
+A versão implantada está disponível para integrantes previamente autorizados:
+
+[Acessar Finanças da Família](https://painel-financas.maioranoo.chatgpt.site)
+
+> O acesso é restrito às contas vinculadas a uma família no painel administrativo.
+
+## Sobre o projeto
+
+O **Finanças da Família** centraliza o acompanhamento financeiro mensal e separa os dados de cada família. A aplicação permite registrar movimentações, entender a distribuição dos gastos e manter integrantes, categorias e formas de pagamento organizados em um único painel.
+
+O produto prioriza leitura rápida, operação simples e consistência entre computador e celular. Famílias que controlam somente despesas recebem uma experiência reduzida; famílias com entradas habilitadas também acompanham receitas e saldo mensal.
+
+## Funcionalidades
+
+- Visão geral mensal com total de gastos, entradas e saldo, conforme a configuração da família.
+- Indicadores por categoria, forma de pagamento e cartão.
+- Cadastro, edição e exclusão de gastos e entradas.
+- Parcelamento de compras feitas no cartão, com distribuição automática entre os meses.
+- Filtros de gastos por categoria e forma de pagamento.
+- Filtro de entradas por categoria.
+- Categorias separadas entre entradas e saídas.
+- Cadastro de formas de pagamento, incluindo identificação de cartões.
+- Relatório mensal preparado para impressão ou exportação em PDF.
+- Ambientes independentes para diferentes famílias.
+- Painel administrativo para criar famílias, configurar o controle de entradas e gerenciar integrantes.
+- Controle de acesso por conta vinculada à família, com estados específicos para acesso não autorizado.
+- Página 404 personalizada e navegação adaptada para telas menores.
+
+## Tecnologias
+
+### Front-end
+
+- [Next.js](https://nextjs.org/) com App Router
+- [React](https://react.dev/)
+- [TypeScript](https://www.typescriptlang.org/)
+- CSS responsivo com propriedades personalizadas e regras específicas para impressão
+
+### Back-end e dados
+
+- Route Handlers do Next.js
+- [Drizzle ORM](https://orm.drizzle.team/)
+- [Cloudflare D1](https://developers.cloudflare.com/d1/) sobre SQLite
+- Migrações SQL versionadas
+- Isolamento das consultas por família
+
+### Infraestrutura e ferramentas
+
+- [Vinext](https://github.com/cloudflare/vinext) e [Vite](https://vite.dev/)
+- [Cloudflare Workers](https://developers.cloudflare.com/workers/)
+- ESLint
+- Test runner nativo do Node.js
+- npm
+
+## Como executar o projeto
+
+### Pré-requisitos
+
+- Node.js `>= 22.13.0`
+- npm
+- Git
+
+### Instalação
 
 ```bash
+git clone https://github.com/Maioranoo/Fluxo-de-caixa.git
+cd Fluxo-de-caixa
 npm install
 npm run dev
-npm run build
 ```
 
-This starter does not use `wrangler.jsonc`.
+Abra [http://localhost:3000](http://localhost:3000) no navegador. A configuração de desenvolvimento fornece um administrador local e um banco D1 simulado pelo plugin da Cloudflare, portanto não é necessário criar um arquivo `.env` para o uso local básico.
 
-## Included Shape
+### Comandos disponíveis
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+| Comando | Descrição |
+| --- | --- |
+| `npm run dev` | Inicia o ambiente de desenvolvimento. |
+| `npm run build` | Gera o build de produção com Vinext. |
+| `npm run start` | Inicia o build de produção. |
+| `npm test` | Executa o build e a suíte de testes. |
+| `npm run lint` | Analisa o código com ESLint. |
 
-## Workspace Auth Headers
+### Configuração do ambiente hospedado
 
-Signed-in visitors receive both `oai-authenticated-user-id` and `oai-authenticated-user-email`. Private Sites require every visitor to sign in; public Sites may also have anonymous visitors, for whom neither header is present.
+O projeto usa o binding `DB`, declarado em `.openai/hosting.json`, para acessar o Cloudflare D1. A hospedagem também pode fornecer as seguintes variáveis de execução:
 
-The user ID is stable for the same user on the same Site and different across Sites. Email and name are intended for display or contact purposes.
+| Variável | Finalidade |
+| --- | --- |
+| `ADMIN_EMAIL` | Define a conta com acesso administrativo. |
+| `INITIAL_HOUSEHOLD_NAME` | Define o nome da família inicial. |
+| `INITIAL_HOUSEHOLD_MEMBERS` | Lista os integrantes iniciais da família. |
+| `LOCAL_ADMIN_ENABLED` | Habilita o administrador local em `localhost`. |
 
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
+`INITIAL_HOUSEHOLD_MEMBERS` usa o formato `Nome|email,Outro nome|outro@email.com`.
 
-Treat the full name as optional and fall back to email when it is absent:
+Valores reais de contas e credenciais devem permanecer fora do repositório.
 
-```tsx
-import { headers } from "next/headers";
+## Estrutura do projeto
 
-export default async function Home() {
-  const requestHeaders = await headers();
-  const userId = requestHeaders.get("oai-authenticated-user-id");
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```text
+.
+├── app/
+│   ├── api/                 # Endpoints financeiros e administrativos
+│   ├── components/          # Componentes da interface
+│   ├── lib/                 # Tipos e utilitários financeiros
+│   ├── globals.css          # Design system, responsividade e impressão
+│   └── page.tsx             # Fluxos e telas principais
+├── db/                      # Schema, conexão e isolamento por família
+├── drizzle/                 # Migrações SQL
+├── tests/                   # Testes de regras e estrutura renderizada
+├── worker/                  # Entrada do Cloudflare Worker
+├── build/                   # Integração do build com Sites
+├── public/                  # Ícones e metadados visuais
+└── .openai/hosting.json     # Bindings do ambiente hospedado
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+## Responsividade e experiência de uso
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+A interface adapta a navegação, os formulários, os indicadores e as tabelas para computador e celular. O projeto também inclui foco visível, navegação semântica, feedback de carregamento e erro, estados vazios, redução opcional de movimento e um layout de impressão próprio para os relatórios mensais.
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
+## Segurança e isolamento
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
+- Cada consulta financeira é limitada à família ativa.
+- Operações de escrita validam a origem da solicitação.
+- O painel administrativo exige uma conta autorizada.
+- Integrantes só acessam a família à qual estão vinculados.
+- Valores, datas, categorias, pessoas e formas de pagamento são validados no servidor.
 
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
+## Deploy
 
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
+O projeto está configurado para publicação no **Sites**, com aplicação server-side executada sobre Cloudflare Workers e persistência no Cloudflare D1.
 
-## Useful Commands
+**Aplicação:** [painel-financas.maioranoo.chatgpt.site](https://painel-financas.maioranoo.chatgpt.site)
 
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
+O ambiente publicado possui acesso controlado; somente integrantes autorizados conseguem abrir uma carteira.
 
-## Learn More
+## Status
 
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+> Em desenvolvimento e recebendo melhorias contínuas.
+
+## Autor
+
+**João Pedro Maiorano**
+
+- [GitHub](https://github.com/Maioranoo)
+- [LinkedIn](https://linkedin.com/in/joão-pedro-maiorano-28a10a3b8)
