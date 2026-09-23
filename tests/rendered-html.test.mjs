@@ -145,3 +145,16 @@ test("privacidade, data local e salvamento protegido estão ativos", async () =>
   assert.match(security, /sec-fetch-site/);
   assert.match(security, /cross-site/);
 });
+
+test("impressão do relatório restaura a tabela de desktop depois das regras mobile", async () => {
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  const lastPrint = css.lastIndexOf("@media print");
+  const lastMobile = css.lastIndexOf("@media(max-width:800px)");
+  assert.ok(lastPrint > lastMobile, "as regras finais de impressão devem prevalecer sobre o layout mobile");
+  const printCss = css.slice(lastPrint);
+  assert.match(printCss, /\.table-wrap table\{display:table!important/);
+  assert.match(printCss, /\.table-wrap thead\{display:table-header-group!important/);
+  assert.match(printCss, /\.table-wrap tr\{display:table-row!important/);
+  assert.match(printCss, /\.table-wrap td\{display:table-cell!important/);
+  assert.match(printCss, /\.table-wrap td:before\{display:none!important/);
+});
