@@ -153,7 +153,8 @@ test("impressão do relatório restaura a tabela de desktop depois das regras mo
   assert.ok(lastPrint > lastMobile, "as regras finais de impressão devem prevalecer sobre o layout mobile");
   const printCss = css.slice(lastPrint);
   assert.match(printCss, /\.table-wrap table\{display:table!important/);
-  assert.match(printCss, /\.table-wrap thead\{display:table-header-group!important/);
+  assert.match(printCss, /\.table-wrap thead\{display:table-row-group!important/);
+  assert.doesNotMatch(printCss, /table-header-group/);
   assert.match(printCss, /\.table-wrap tr\{display:table-row!important/);
   assert.match(printCss, /\.table-wrap td\{display:table-cell!important/);
   assert.match(printCss, /\.table-wrap td:before\{display:none!important/);
