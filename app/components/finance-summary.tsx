@@ -9,11 +9,11 @@ export function Metric({ label, value }: { label: string; value: number }) {
 }
 
 export function FinancialSummary({ allowIncome, monthLabel, expensesTotal, incomeTotal, balance, expenseCount, incomeCount }: { allowIncome: boolean; monthLabel: string; expensesTotal: number; incomeTotal: number; balance: number; expenseCount: number; incomeCount: number }) {
-  if (!allowIncome) return <div className="hero-card" data-tone="negative"><div className="summary-card-icon"><Icon name="arrowUp"/></div><div><small>Gastos em {monthLabel}</small><strong>− {formatMoney(expensesTotal)}</strong><span>{expenseCount} lançamento{expenseCount === 1 ? "" : "s"} no período</span></div></div>;
+  if (!allowIncome) return <div className="hero-card" data-tone="negative"><div className="summary-card-icon"><Icon name="arrowUp"/></div><div><small>Gastos em {monthLabel}</small><strong>{formatMoney(expensesTotal)}</strong><span>{expenseCount} lançamento{expenseCount === 1 ? "" : "s"} no período</span></div></div>;
   return <div className="summary-finance-grid">
     <article className={`summary-money balance ${balance < 0 ? "negative" : "positive"}`} data-tone={balance < 0 ? "negative" : "positive"}><span className="summary-card-icon"><Icon name={balance < 0 ? "arrowDown" : "wallet"}/></span><small>Saldo em {monthLabel}</small><strong>{balance < 0 ? "−" : "+"} {formatMoney(Math.abs(balance))}</strong><span>Entradas menos gastos</span></article>
     <article className="summary-money incomes" data-tone="positive"><span className="summary-card-icon"><Icon name="arrowDown"/></span><small>Entradas</small><strong>+ {formatMoney(incomeTotal)}</strong><span>{incomeCount} entrada{incomeCount === 1 ? "" : "s"}</span></article>
-    <article className="summary-money expenses" data-tone="negative"><span className="summary-card-icon"><Icon name="arrowUp"/></span><small>Gastos</small><strong>− {formatMoney(expensesTotal)}</strong><span>{expenseCount} gasto{expenseCount === 1 ? "" : "s"}</span></article>
+    <article className="summary-money expenses" data-tone="negative"><span className="summary-card-icon"><Icon name="arrowUp"/></span><small>Gastos</small><strong>{formatMoney(expensesTotal)}</strong><span>{expenseCount} gasto{expenseCount === 1 ? "" : "s"}</span></article>
   </div>;
 }
 
