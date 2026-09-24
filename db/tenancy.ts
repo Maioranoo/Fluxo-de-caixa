@@ -78,7 +78,7 @@ async function bootstrapLocalHousehold() {
   await db.update(categories).set({ householdId: household.id }).where(isNull(categories.householdId));
   await db.update(expenses).set({ householdId: household.id }).where(isNull(expenses.householdId));
   const legacyPayments = await db.selectDistinct({ key: expenses.paymentMethod }).from(expenses).where(eq(expenses.householdId, household.id));
-  for (const payment of legacyPayments) await db.insert(paymentMethods).values({ householdId: household.id, key: payment.key, name: legacyPaymentName(payment.key), isCard: payment.key.startsWith("cartao_") }).onConflictDoNothing();
+  for (const payment of legacyPayments) if (payment.key) await db.insert(paymentMethods).values({ householdId: household.id, key: payment.key, name: legacyPaymentName(payment.key), isCard: payment.key.startsWith("cartao_") }).onConflictDoNothing();
 }
 
 async function bootstrapInitialHousehold(currentEmail: string) {
@@ -98,7 +98,7 @@ async function bootstrapInitialHousehold(currentEmail: string) {
   await db.update(categories).set({ householdId: household.id }).where(isNull(categories.householdId));
   await db.update(expenses).set({ householdId: household.id }).where(isNull(expenses.householdId));
   const legacyPayments = await db.selectDistinct({ key: expenses.paymentMethod }).from(expenses).where(eq(expenses.householdId, household.id));
-  for (const payment of legacyPayments) {
+  for (const payment of legacyPayments) if (payment.key) {
     await db.insert(paymentMethods).values({ householdId: household.id, key: payment.key, name: legacyPaymentName(payment.key), isCard: payment.key.startsWith("cartao_") }).onConflictDoNothing();
   }
 }

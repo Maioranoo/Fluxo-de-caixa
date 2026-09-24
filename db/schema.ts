@@ -42,14 +42,61 @@ export const paymentMethods = sqliteTable("payment_methods", {
   uniqueIndex("idx_payment_methods_household_key").on(t.householdId, t.key),
 ]);
 
+export const importBatches = sqliteTable("import_batches", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  householdId: integer("household_id").notNull().references(() => households.id),
+  originalFilename: text("original_filename").notNull(),
+  fileHash: text("file_hash").notNull(),
+  sourceType: text("source_type").notNull(),
+  mode: text("mode").notNull(),
+  referenceMonth: text("reference_month").notNull(),
+  importedByMemberId: integer("imported_by_member_id").references(() => householdMembers.id, { onDelete: "set null" }),
+  importedByName: text("imported_by_name").notNull(),
+  defaultPaymentMethod: text("default_payment_method"),
+  defaultPerson: text("default_person"),
+  itemCount: integer("item_count").notNull(),
+  totalCents: integer("total_cents").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, t => [
+  index("idx_import_batches_household_month").on(t.householdId, t.referenceMonth),
+  index("idx_import_batches_household_hash").on(t.householdId, t.fileHash),
+]);
+
+export const categoryRules = sqliteTable("category_rules", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  householdId: integer("household_id").notNull().references(() => households.id),
+  categoryId: integer("category_id").notNull().references(() => categories.id),
+  pattern: text("pattern").notNull(),
+  source: text("source").notNull().default("learned"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, t => [uniqueIndex("idx_category_rules_household_pattern").on(t.householdId, t.pattern)]);
+
+export const importBatchCategories = sqliteTable("import_batch_categories", {
+  importBatchId: integer("import_batch_id").notNull().references(() => importBatches.id, { onDelete: "cascade" }),
+  categoryId: integer("category_id").notNull().references(() => categories.id),
+}, t => [uniqueIndex("idx_import_batch_categories_pair").on(t.importBatchId, t.categoryId)]);
+
 export const expenses = sqliteTable("expenses", {
-  id: integer("id").primaryKey({ autoIncrement: true }), householdId: integer("household_id").references(() => households.id), amountCents: integer("amount_cents").notNull(), description: text("description").notNull(),
-  categoryId: integer("category_id").notNull().references(() => categories.id), paymentMethod: text("payment_method").notNull(), person: text("person").notNull(),
-  occurredAt: text("occurred_at").notNull(), createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`)
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  householdId: integer("household_id").references(() => households.id),
+  amountCents: integer("amount_cents").notNull(),
+  description: text("description"),
+  categoryId: integer("category_id").references(() => categories.id),
+  paymentMethod: text("payment_method"),
+  person: text("person"),
+  occurredAt: text("occurred_at"),
+  importBatchId: integer("import_batch_id").references(() => importBatches.id, { onDelete: "cascade" }),
+  referenceMonth: text("reference_month"),
+  importFingerprint: text("import_fingerprint"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, t => [
   index("idx_expenses_household_date").on(t.householdId, t.occurredAt),
   index("idx_expenses_household_category_date").on(t.householdId, t.categoryId, t.occurredAt),
   index("idx_expenses_household_payment_date").on(t.householdId, t.paymentMethod, t.occurredAt),
+  index("idx_expenses_household_reference_month").on(t.householdId, t.referenceMonth),
+  index("idx_expenses_household_fingerprint").on(t.householdId, t.importFingerprint),
+  index("idx_expenses_import_batch").on(t.importBatchId),
 ]);
 
 export const incomes = sqliteTable("incomes", {

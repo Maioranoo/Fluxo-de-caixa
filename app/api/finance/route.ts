@@ -1,9 +1,10 @@
-import { and, asc, eq, gte, lt } from "drizzle-orm";
+import { and, asc, eq, gte, isNull, lt, or, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { AccessError, requireHousehold } from "../../../db/tenancy";
-import { categories, expenses, householdMembers, households, incomes, paymentMethods } from "../../../db/schema";
+import { categories, categoryRules, expenses, householdMembers, households, importBatches, incomes, paymentMethods } from "../../../db/schema";
 import { isCategoryKind, isValidDateInput, isValidMonthInput, normalizeCategoryName, normalizeDescription, normalizePaymentName, parseInstallments, parseMoneyInput, parsePositiveSafeInteger } from "../../lib/validation";
 import { assertSameSite } from "../security";
+import { normalizeMerchant } from "../../lib/imports/fingerprint.ts";
 
 export async function GET(request: Request) {
   try {
@@ -13,9 +14,9 @@ export async function GET(request: Request) {
     const start = `${month}-01`, end = nextMonth(month), db = getDb();
     const [categoryRows, expenseRows, incomeRows, memberRows, paymentRows, householdRows, currentHouseholdRows] = await Promise.all([
       db.select({ id: categories.id, name: categories.name, kind: categories.kind }).from(categories).where(eq(categories.householdId, context.householdId)).orderBy(asc(categories.name)),
-      db.select({ id: expenses.id, amountCents: expenses.amountCents, description: expenses.description, categoryId: expenses.categoryId, category: categories.name, paymentMethod: expenses.paymentMethod, person: expenses.person, occurredAt: expenses.occurredAt })
-        .from(expenses).innerJoin(categories, and(eq(expenses.categoryId, categories.id), eq(categories.householdId, context.householdId)))
-        .where(and(eq(expenses.householdId, context.householdId), gte(expenses.occurredAt, start), lt(expenses.occurredAt, end))).orderBy(asc(expenses.occurredAt), asc(expenses.id)),
+      db.select({ id: expenses.id, amountCents: expenses.amountCents, description: expenses.description, categoryId: expenses.categoryId, category: categories.name, paymentMethod: expenses.paymentMethod, person: expenses.person, occurredAt: expenses.occurredAt, referenceMonth: expenses.referenceMonth, importBatchId: expenses.importBatchId })
+        .from(expenses).leftJoin(categories, and(eq(expenses.categoryId, categories.id), eq(categories.householdId, context.householdId)))
+        .where(and(eq(expenses.householdId, context.householdId), or(eq(expenses.referenceMonth, month), and(isNull(expenses.referenceMonth), gte(expenses.occurredAt, start), lt(expenses.occurredAt, end))))).orderBy(asc(expenses.occurredAt), asc(expenses.id)),
       db.select({ id: incomes.id, amountCents: incomes.amountCents, description: incomes.description, categoryId: incomes.categoryId, category: categories.name, person: incomes.person, occurredAt: incomes.occurredAt })
         .from(incomes).leftJoin(categories, and(eq(incomes.categoryId, categories.id), eq(categories.householdId, context.householdId))).where(and(eq(incomes.householdId, context.householdId), gte(incomes.occurredAt, start), lt(incomes.occurredAt, end))).orderBy(asc(incomes.occurredAt), asc(incomes.id)),
       db.select({ id: householdMembers.id, name: householdMembers.displayName, email: householdMembers.email, role: householdMembers.role }).from(householdMembers).where(eq(householdMembers.householdId, context.householdId)).orderBy(asc(householdMembers.displayName)),
@@ -83,7 +84,7 @@ export async function POST(request: Request) {
     if (typeof body.person !== "string" || !allowedPeople.some(person => person.name === body.person)) return invalid("Selecione um integrante válido.");
     if (!isValidDateInput(addMonths(body.occurredAt as string, installmentCount - 1))) return invalid("A última parcela precisa ficar dentro do limite de dezembro de 2200.");
     const baseAmount = Math.floor(amountCents / installmentCount), remainder = amountCents % installmentCount;
-    const rows = Array.from({ length: installmentCount }, (_, index) => ({ householdId: context.householdId, amountCents: baseAmount + (index < remainder ? 1 : 0), description: installmentCount > 1 ? `${description} (${index + 1}/${installmentCount})` : description, categoryId, paymentMethod: body.paymentMethod as string, person: body.person, occurredAt: addMonths(body.occurredAt as string, index) }));
+    const rows = Array.from({ length: installmentCount }, (_, index) => ({ householdId: context.householdId, amountCents: baseAmount + (index < remainder ? 1 : 0), description: installmentCount > 1 ? `${description} (${index + 1}/${installmentCount})` : description, categoryId, paymentMethod: body.paymentMethod as string, person: body.person as string, occurredAt: addMonths(body.occurredAt as string, index) }));
     const created = await db.insert(expenses).values(rows).returning();
     return Response.json({ expenses: created.map(item => ({ ...item, category: ownedCategory.name })), installments: installmentCount }, { status: 201 });
   } catch (error) { return accessResponse(error); }
@@ -95,17 +96,26 @@ export async function PATCH(request: Request) {
     const context = await requireHousehold(request), body = await request.json() as Record<string, unknown>, db = getDb();
     if (body.type === "expense") {
       const id = parsePositiveSafeInteger(body.id), amountCents = parseMoneyInput(body.amount), categoryId = parsePositiveSafeInteger(body.categoryId), description = normalizeDescription(body.description);
+      const [currentExpense] = id ? await db.select({ amountCents: expenses.amountCents, importBatchId: expenses.importBatchId, referenceMonth: expenses.referenceMonth }).from(expenses).where(and(eq(expenses.id, id), eq(expenses.householdId, context.householdId))).limit(1) : [];
+      const imported = Boolean(currentExpense?.importBatchId);
+      const importedDescription = imported && (body.description === null || body.description === "") ? null : description;
       const [ownedCategory] = categoryId ? await db.select({ id: categories.id, name: categories.name }).from(categories).where(and(eq(categories.id, categoryId), eq(categories.householdId, context.householdId), eq(categories.kind, "expense"))).limit(1) : [];
       const [ownedPayment] = typeof body.paymentMethod === "string" && body.paymentMethod ? await db.select({ key: paymentMethods.key }).from(paymentMethods).where(and(eq(paymentMethods.key, body.paymentMethod), eq(paymentMethods.householdId, context.householdId))).limit(1) : [];
       const allowedPeople = await db.select({ name: householdMembers.displayName }).from(householdMembers).where(eq(householdMembers.householdId, context.householdId));
-      if (!id) return invalid("Gasto inválido.");
+      if (!id || !currentExpense) return invalid("Gasto inválido.");
       if (!amountCents) return invalid("Informe um valor entre R$ 0,01 e R$ 999.999.999,99, com no máximo dois centavos.");
-      if (!description) return invalid("A descrição deve conter letras e ter no máximo 160 caracteres.");
-      if (!ownedCategory || !ownedPayment) return invalid("Selecione categoria e pagamento válidos.");
-      if (!isValidDateInput(body.occurredAt)) return invalid("Selecione uma data válida entre 2000 e 2200.");
-      if (typeof body.person !== "string" || !allowedPeople.some(person => person.name === body.person)) return invalid("Selecione um integrante válido.");
-      const [expense] = await db.update(expenses).set({ amountCents, description, categoryId, paymentMethod: body.paymentMethod as string, person: body.person, occurredAt: body.occurredAt as string }).where(and(eq(expenses.id, id), eq(expenses.householdId, context.householdId))).returning();
-      return expense ? Response.json({ expense: { ...expense, category: ownedCategory.name } }) : Response.json({ error: "Gasto não encontrado." }, { status: 404 });
+      if (!importedDescription && !imported) return invalid("A descrição deve conter letras e ter no máximo 160 caracteres.");
+      if ((!ownedCategory || !ownedPayment) && !imported) return invalid("Selecione categoria e pagamento válidos.");
+      if (body.occurredAt && !isValidDateInput(body.occurredAt)) return invalid("Selecione uma data válida entre 2000 e 2200.");
+      if (!body.occurredAt && !imported) return invalid("Selecione uma data válida entre 2000 e 2200.");
+      if (body.person && (typeof body.person !== "string" || !allowedPeople.some(person => person.name === body.person))) return invalid("Selecione um integrante válido.");
+      if (!body.person && !imported) return invalid("Selecione um integrante válido.");
+      const referenceMonth = imported ? (isValidMonthInput(body.referenceMonth) ? body.referenceMonth as string : currentExpense.referenceMonth) : null;
+      const [expense] = await db.update(expenses).set({ amountCents, description: importedDescription, categoryId: ownedCategory?.id ?? null, paymentMethod: ownedPayment?.key ?? null, person: typeof body.person === "string" && body.person ? body.person : null, occurredAt: typeof body.occurredAt === "string" && body.occurredAt ? body.occurredAt : null, referenceMonth }).where(and(eq(expenses.id, id), eq(expenses.householdId, context.householdId))).returning();
+      if (expense && currentExpense.importBatchId && amountCents !== currentExpense.amountCents) await db.update(importBatches).set({ totalCents: sql`${importBatches.totalCents} + ${amountCents - currentExpense.amountCents}` }).where(and(eq(importBatches.id, currentExpense.importBatchId), eq(importBatches.householdId, context.householdId)));
+      const pattern = normalizeMerchant(importedDescription);
+      if (expense && imported && ownedCategory && pattern) await db.insert(categoryRules).values({ householdId: context.householdId, categoryId: ownedCategory.id, pattern, source: "learned" }).onConflictDoUpdate({ target: [categoryRules.householdId, categoryRules.pattern], set: { categoryId: ownedCategory.id, updatedAt: sql`CURRENT_TIMESTAMP` } });
+      return expense ? Response.json({ expense: { ...expense, category: ownedCategory?.name ?? null } }) : Response.json({ error: "Gasto não encontrado." }, { status: 404 });
     }
     if (body.type === "income") {
       const id = parsePositiveSafeInteger(body.id), amountCents = parseMoneyInput(body.amount), categoryId = parsePositiveSafeInteger(body.categoryId), description = normalizeDescription(body.description);
@@ -157,7 +167,14 @@ export async function DELETE(request: Request) {
     const context = await requireHousehold(request), url = new URL(request.url), id = parsePositiveSafeInteger(url.searchParams.get("id")), type = url.searchParams.get("type"), db = getDb();
     if (!id || !["expense", "income", "category", "payment"].includes(type ?? "")) return Response.json({ error: "Solicitação inválida." }, { status: 400 });
     if (type === "expense") {
-      const deleted = await db.delete(expenses).where(and(eq(expenses.id, id), eq(expenses.householdId, context.householdId))).returning({ id: expenses.id });
+      const [current] = await db.select({ amountCents: expenses.amountCents, importBatchId: expenses.importBatchId }).from(expenses).where(and(eq(expenses.id, id), eq(expenses.householdId, context.householdId))).limit(1);
+      if (!current) return Response.json({ error: "Gasto não encontrado." }, { status: 404 });
+      const removeExpense = db.delete(expenses).where(and(eq(expenses.id, id), eq(expenses.householdId, context.householdId)));
+      if (current.importBatchId) {
+        const updateBatch = db.update(importBatches).set({ itemCount: sql`max(${importBatches.itemCount} - 1, 0)`, totalCents: sql`${importBatches.totalCents} - ${current.amountCents}` }).where(and(eq(importBatches.id, current.importBatchId), eq(importBatches.householdId, context.householdId)));
+        await db.batch([removeExpense, updateBatch]);
+      } else await db.batch([removeExpense]);
+      const deleted = [{ id }];
       return deleted.length ? Response.json({ ok: true }) : Response.json({ error: "Gasto não encontrado." }, { status: 404 });
     }
     if (type === "income") {
@@ -177,7 +194,11 @@ export async function DELETE(request: Request) {
       db.select({ id: incomes.id }).from(incomes).where(and(eq(incomes.householdId, context.householdId), eq(incomes.categoryId, id))).limit(1),
     ]);
     if (linkedExpenses.length || linkedIncomes.length) return Response.json({ error: "Essa categoria possui lançamentos. Exclua-os antes de apagar a categoria." }, { status: 409 });
-    const deleted = await db.delete(categories).where(and(eq(categories.id, id), eq(categories.householdId, context.householdId))).returning({ id: categories.id });
+    const results = await db.batch([
+      db.delete(categoryRules).where(and(eq(categoryRules.householdId, context.householdId), eq(categoryRules.categoryId, id))),
+      db.delete(categories).where(and(eq(categories.id, id), eq(categories.householdId, context.householdId))).returning({ id: categories.id }),
+    ]);
+    const deleted = results[1] as { id: number }[];
     return deleted.length ? Response.json({ ok: true }) : Response.json({ error: "Categoria não encontrada." }, { status: 404 });
   } catch (error) { return accessResponse(error); }
 }

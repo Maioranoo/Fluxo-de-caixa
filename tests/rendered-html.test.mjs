@@ -180,3 +180,34 @@ test("redesign mantém navegação, foco, redução de movimento e componentes s
   assert.match(css, /prefers-reduced-motion:reduce/);
   assert.doesNotMatch(`${page}\n${shell}\n${ui}`, /✎|🗑|⚙/);
 });
+
+test("importador possui conferência editável equivalente no desktop e mobile", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const workspace = await readFile(new URL("../app/components/imports/import-workspace.tsx", import.meta.url), "utf8");
+  const fileStep = await readFile(new URL("../app/components/imports/file-step.tsx", import.meta.url), "utf8");
+  const mapper = await readFile(new URL("../app/components/imports/column-mapper.tsx", import.meta.url), "utf8");
+  const table = await readFile(new URL("../app/components/imports/preview-table.tsx", import.meta.url), "utf8");
+  const cards = await readFile(new URL("../app/components/imports/preview-cards.tsx", import.meta.url), "utf8");
+  const history = await readFile(new URL("../app/components/imports/import-history.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(page, /Importar arquivo/);
+  assert.match(fileStep, /Não trazer detalhes/);
+  assert.match(mapper, /!minimal/);
+  assert.match(workspace, /configure/);
+  assert.match(workspace, /mapping/);
+  assert.match(workspace, /preview/);
+  assert.match(table, /import-preview-table/);
+  assert.match(cards, /import-preview-cards/);
+  assert.match(cards, /Editar/);
+  assert.match(css, /\.import-preview-table/);
+  assert.match(css, /\.import-preview-cards/);
+  assert.match(css, /@media\(max-width:800px\)/);
+  assert.match(workspace, /PAGE_SIZE = 50/);
+  assert.match(workspace, /Data divergente/);
+  assert.match(workspace, /Possível duplicidade/);
+  assert.match(workspace, /categoryReviewed/);
+  assert.match(workspace, /suggestedCategoryName: null/);
+  assert.match(history, /itemsRequestId/);
+  assert.match(page, /key={`\$\{selectedHousehold\}-\$\{month\}`}/);
+  assert.match(page, /expenseDateKey\(a\)\.localeCompare\(expenseDateKey\(b\)\)/);
+});

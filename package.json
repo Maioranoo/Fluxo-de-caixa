@@ -9,17 +9,19 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "test": "npm run build && node --experimental-strip-types --test tests/rendered-html.test.mjs tests/finance-ui.test.mjs tests/validation.test.mjs",
+    "test": "npm run build && node --experimental-strip-types --test tests/rendered-html.test.mjs tests/finance-ui.test.mjs tests/validation.test.mjs tests/import-api-structure.test.mjs tests/import-validation.test.mjs tests/import-tabular-parser.test.mjs tests/import-category-rules.test.mjs",
     "lint": "eslint app tests db --ignore-pattern dist --ignore-pattern .next --ignore-pattern .vinext --ignore-pattern .wrangler"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
     "next": "^16.3.4",
+    "pdfjs-dist": "^6.3.289",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.54.5",
+    "@cloudflare/vite-plugin": "^1.58.0",
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
     "@types/react": "^19.2.18",
@@ -33,7 +35,7 @@
     "typescript": "5.9.3",
     "vinext": "^1.0.0-beta.9",
     "vite": "^8.2.2",
-    "wrangler": "^4.129.1"
+    "wrangler": "^4.137.0"
   },
   "type": "module"
 }
