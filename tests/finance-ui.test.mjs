@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { formatDate, formatMoney, groupExpenseCategories, groupTotals } from "../app/lib/finance-ui.ts";
+import * as financeUi from "../app/lib/finance-ui.ts";
+
+const { formatDate, formatMoney, groupExpenseCategories, groupTotals } = financeUi;
 
 test("formata valores, datas e totais para o painel", () => {
   assert.equal(formatDate("2026-09-23"), "23/09/2026");
@@ -17,4 +19,15 @@ test("gastos importados aceitam campos vazios na apresentação", () => {
     { name: "Sem categoria", total: 1000 },
     { name: "Mercado", total: 250 },
   ]);
+});
+
+test("a família inicial preenche a interface sem disparar outra busca", () => {
+  assert.deepEqual(
+    financeUi.adoptLoadedHousehold({ selectedId: "", requestedId: "" }, "7"),
+    { selectedId: "7", requestedId: "" },
+  );
+  assert.deepEqual(
+    financeUi.chooseHousehold({ selectedId: "7", requestedId: "" }, "9"),
+    { selectedId: "9", requestedId: "9" },
+  );
 });

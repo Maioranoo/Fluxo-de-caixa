@@ -7,6 +7,17 @@ export type Expense = { id: number; amountCents: number; description: string | n
 export type Income = { id: number; amountCents: number; description: string; categoryId: number | null; category: string | null; person: string; occurredAt: string };
 export type Household = { id: number; name: string; allowIncome: boolean };
 export type FinanceData = { categories: Category[]; expenses: Expense[]; incomes: Income[]; members: Member[]; payments: Payment[]; households: Household[]; household: Household | null; currentMember: string; isAdmin: boolean };
+export type HouseholdSelection = { selectedId: string; requestedId: string };
+
+export function adoptLoadedHousehold(current: HouseholdSelection, loadedId: string): HouseholdSelection {
+  if (current.selectedId || !loadedId) return current;
+  return { ...current, selectedId: loadedId };
+}
+
+export function chooseHousehold(current: HouseholdSelection, selectedId: string): HouseholdSelection {
+  if (current.selectedId === selectedId && current.requestedId === selectedId) return current;
+  return { selectedId, requestedId: selectedId };
+}
 
 export const formatMoney = (cents: number) => new Intl.NumberFormat("pt-BR", {
   style: "currency",

@@ -5,6 +5,7 @@ export interface RateLimitDatabase {
   prepare(query: string): {
     bind(...values: (string | number)[]): {
       first<T>(): Promise<T | null>;
+      all<T>(): Promise<{ results: T[] }>;
       run(): Promise<unknown>;
     };
   };
@@ -31,16 +32,23 @@ export async function enforceRateLimit(db: RateLimitDatabase, identity: string, 
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(identity));
   const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
   try {
-    for (const policy of policies) {
-      const row = await db.prepare(`
-        INSERT INTO request_rate_limits (bucket_key, hits, expires_at) VALUES (?, 1, ?)
-        ON CONFLICT(bucket_key) DO UPDATE SET
-          hits = CASE WHEN request_rate_limits.expires_at <= ? THEN 1 ELSE MIN(request_rate_limits.hits + 1, ?) END,
-          expires_at = CASE WHEN request_rate_limits.expires_at <= ? THEN excluded.expires_at ELSE request_rate_limits.expires_at END
-        RETURNING hits, expires_at
-      `).bind(`${policy.scope}:${hash}`, expiresAt, seconds, policy.limit + 1, seconds).first<{ hits: number; expires_at: number }>();
+    const buckets = policies.map(policy => ({ key: `${policy.scope}:${hash}`, limit: policy.limit }));
+    const result = await db.prepare(`
+      INSERT INTO request_rate_limits (bucket_key, hits, expires_at)
+      SELECT json_extract(value, '$.key'), 1, ?
+      FROM json_each(?)
+      WHERE true
+      ON CONFLICT(bucket_key) DO UPDATE SET
+        hits = CASE WHEN request_rate_limits.expires_at <= ? THEN 1 ELSE request_rate_limits.hits + 1 END,
+        expires_at = CASE WHEN request_rate_limits.expires_at <= ? THEN excluded.expires_at ELSE request_rate_limits.expires_at END
+      RETURNING bucket_key, hits, expires_at
+    `).bind(expiresAt, JSON.stringify(buckets), seconds, seconds).all<{ bucket_key: string; hits: number; expires_at: number }>();
+    if (result.results.length !== policies.length) throw new Error("Rate limit storage unavailable");
+    const rows = new Map(result.results.map(row => [row.bucket_key, row]));
+    for (const bucket of buckets) {
+      const row = rows.get(bucket.key);
       if (!row) throw new Error("Rate limit storage unavailable");
-      if (row.hits > policy.limit) throw new AccessError("Muitas solicitações. Aguarde antes de tentar novamente.", 429, { "Retry-After": String(Math.max(1, row.expires_at - seconds)), "Cache-Control": "no-store" });
+      if (row.hits > bucket.limit) throw new AccessError("Muitas solicitações. Aguarde antes de tentar novamente.", 429, { "Retry-After": String(Math.max(1, row.expires_at - seconds)), "Cache-Control": "no-store" });
     }
   } catch (error) {
     if (error instanceof AccessError) throw error;

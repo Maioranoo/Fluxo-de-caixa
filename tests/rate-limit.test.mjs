@@ -7,8 +7,23 @@ import { enforceRateLimit, requestPolicies, clientIdentity, cleanupRateLimits } 
 function store() {
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec(readFileSync(new URL("../drizzle/0006_request_rate_limits.sql", import.meta.url), "utf8"));
-  const db = { prepare(sql) { const stmt = sqlite.prepare(sql); return { bind(...values) { return { async first() { return stmt.get(...values) ?? null; }, async run() { return stmt.run(...values); } }; } }; } };
-  return { sqlite, db };
+  let prepareCalls = 0;
+  const db = {
+    prepare(sql) {
+      prepareCalls += 1;
+      const stmt = sqlite.prepare(sql);
+      return {
+        bind(...values) {
+          return {
+            async first() { return stmt.get(...values) ?? null; },
+            async all() { return { results: stmt.all(...values) }; },
+            async run() { return stmt.run(...values); },
+          };
+        },
+      };
+    },
+  };
+  return { sqlite, db, getPrepareCalls: () => prepareCalls };
 }
 
 test("atomic shared counters resist concurrent requests, isolate identities and reset after expiry", async () => {
@@ -30,6 +45,28 @@ test("atomic shared counters resist concurrent requests, isolate identities and 
 
 test("storage outage fails closed", async () => {
   await assert.rejects(enforceRateLimit({ prepare() { throw new Error("private database detail"); } }, "ip:unknown", [{ scope: "all", limit: 5 }]), error => error.status === 503 && !error.message.includes("private"));
+});
+
+test("todas as políticas da identidade usam uma única operação no banco", async () => {
+  const { sqlite, db, getPrepareCalls } = store();
+  try {
+    await enforceRateLimit(db, "ip:192.0.2.10", [
+      { scope: "all", limit: 300 },
+      { scope: "api", limit: 120 },
+      { scope: "write", limit: 30 },
+      { scope: "import", limit: 10 },
+    ], 61000);
+    assert.equal(getPrepareCalls(), 1);
+    assert.deepEqual(
+      sqlite.prepare("SELECT substr(bucket_key, 1, instr(bucket_key, ':') - 1) AS scope, hits FROM request_rate_limits ORDER BY scope").all().map(row => ({ ...row })),
+      [
+        { scope: "all", hits: 1 },
+        { scope: "api", hits: 1 },
+        { scope: "import", hits: 1 },
+        { scope: "write", hits: 1 },
+      ],
+    );
+  } finally { sqlite.close(); }
 });
 
 test("public, authenticated and unknown paths all have a shared cap; imports have a stricter cap", () => {

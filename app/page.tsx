@@ -7,7 +7,7 @@ import { Icon } from "./components/icons";
 import { ExpenseTable, IncomeTable } from "./components/transactions";
 import { DialogFrame, Empty, IconButton, LoadingSkeleton, Panel, StatusNotice } from "./components/ui";
 import { ImportWorkspace } from "./components/imports/import-workspace";
-import { formatMoney, groupExpenseCategories, groupTotals, type Category, type CategoryFilter, type CategoryKind, type Expense, type FinanceData, type Household, type Income, type Member, type Payment } from "./lib/finance-ui";
+import { adoptLoadedHousehold, chooseHousehold, formatMoney, groupExpenseCategories, groupTotals, type Category, type CategoryFilter, type CategoryKind, type Expense, type FinanceData, type Household, type HouseholdSelection, type Income, type Member, type Payment } from "./lib/finance-ui";
 import { MAX_CATEGORY_LENGTH, MAX_DESCRIPTION_LENGTH, MAX_EMAIL_LENGTH, MAX_INSTALLMENTS, MAX_MEMBERS, MAX_NAME_LENGTH, isValidDateInput, isValidMonthInput, normalizeCategoryName, normalizeDescription, normalizeImportedDescription, normalizeEmail, normalizeName, normalizePaymentName, parseInstallments, parseMoneyInput, validateMembers } from "./lib/validation";
 type AccessError = { status: number; message: string };
 
@@ -22,7 +22,9 @@ export default function Home() {
   const [monthDraft, setMonthDraft] = useState(monthKey());
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [data, setData] = useState<FinanceData>({ categories: [], expenses: [], incomes: [], members: [], payments: [], households: [], household: null, currentMember: "", isAdmin: false });
-  const [selectedHousehold, setSelectedHousehold] = useState("");
+  const [householdSelection, setHouseholdSelection] = useState<HouseholdSelection>({ selectedId: "", requestedId: "" });
+  const selectedHousehold = householdSelection.selectedId;
+  const requestedHousehold = householdSelection.requestedId;
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
   const [accessError, setAccessError] = useState<AccessError | null>(null);
@@ -63,14 +65,14 @@ export default function Home() {
 
   useEffect(() => {
     let active = true;
-    void fetch(`/api/finance?month=${month}`, { headers: selectedHousehold ? { "x-household-id": selectedHousehold } : {} }).then(async response => ({ response, payload: await response.json() as FinanceData & { error?: string } })).then(({ response, payload }) => {
+    void fetch(`/api/finance?month=${month}`, { headers: requestedHousehold ? { "x-household-id": requestedHousehold } : {} }).then(async response => ({ response, payload: await response.json() as FinanceData & { error?: string } })).then(({ response, payload }) => {
       if (!active) return;
       if (response.status === 401 || response.status === 403) setAccessError({ status: response.status, message: payload.error ?? "Esta conta ainda não tem acesso a uma carteira." });
-      else if (payload.error) setNotice(payload.error); else { setAccessError(null); setData(payload); if (!selectedHousehold && payload.household) setSelectedHousehold(String(payload.household.id)); const person = payload.currentMember || payload.members[0]?.name || ""; setForm(current => ({ ...current, person: person || current.person, categoryId: "", paymentMethod: "" })); setIncomeForm(current => ({ ...current, person: person || current.person, categoryId: "" })); setExpenseCategory("all"); setExpensePayment("all"); setIncomeCategory("all"); setCategoryFilter(payload.household?.allowIncome ? "all" : "expense"); if (!payload.household?.allowIncome) { setCategoryKind("expense"); setEditingCategoryId(null); setTab(current => current === "entradas" ? "resumo" : current); } }
+      else if (payload.error) setNotice(payload.error); else { setAccessError(null); setData(payload); if (payload.household) setHouseholdSelection(current => adoptLoadedHousehold(current, String(payload.household!.id))); const person = payload.currentMember || payload.members[0]?.name || ""; setForm(current => ({ ...current, person: person || current.person, categoryId: "", paymentMethod: "" })); setIncomeForm(current => ({ ...current, person: person || current.person, categoryId: "" })); setExpenseCategory("all"); setExpensePayment("all"); setIncomeCategory("all"); setCategoryFilter(payload.household?.allowIncome ? "all" : "expense"); if (!payload.household?.allowIncome) { setCategoryKind("expense"); setEditingCategoryId(null); setTab(current => current === "entradas" ? "resumo" : current); } }
       setLoading(false);
     }).catch(() => { if (active) { setNotice("Não foi possível acessar os dados agora."); setLoading(false); } });
     return () => { active = false; };
-  }, [month, selectedHousehold, refreshKey]);
+  }, [month, requestedHousehold, refreshKey]);
   useEffect(() => {
     if (!expenseEdit.id && !incomeEdit.id && !memberEdit.id) return;
     const close = (event: KeyboardEvent) => { if (event.key === "Escape") { setExpenseEdit(current => ({ ...current, id: 0 })); setIncomeEdit(current => ({ ...current, id: 0 })); setMemberEdit(current => ({ ...current, id: 0 })); } };
@@ -185,7 +187,7 @@ export default function Home() {
     if (!response.ok || !result.household) return setNotice(result.error ?? "Não foi possível criar a família.");
     setData(current => ({ ...current, households: [...current.households, result.household!].sort((a,b)=>a.name.localeCompare(b.name)) }));
     setAdminForm({ name: "", allowIncome: false, members: [{ name: "", email: "" }] });
-    setNotice(`Carteira “${result.household.name}” criada com sucesso.`); setSelectedHousehold(String(result.household.id)); setTab("resumo");
+    setNotice(`Carteira “${result.household.name}” criada com sucesso.`); setHouseholdSelection(current => chooseHousehold(current, String(result.household!.id))); setTab("resumo");
   }
 
   async function addIncome(event: React.FormEvent) {
@@ -326,7 +328,7 @@ export default function Home() {
 
   return <div className="app-shell">
     <a className="skip-link" href="#main-content">Ir para o conteúdo principal</a>
-    <AppSidebar items={navigationItems} tab={tab} onNavigate={openTab} isAdmin={data.isAdmin} households={data.households} selectedHousehold={selectedHousehold} householdName={data.household?.name ?? "Sua família"} onHouseholdChange={setSelectedHousehold}/>
+    <AppSidebar items={navigationItems} tab={tab} onNavigate={openTab} isAdmin={data.isAdmin} households={data.households} selectedHousehold={selectedHousehold} householdName={data.household?.name ?? "Sua família"} onHouseholdChange={householdId => setHouseholdSelection(current => chooseHousehold(current, householdId))}/>
     <main id="main-content">
       <PageHeader eyebrow="Controle familiar" title={tabTitle(tab)} monthLabel={monthLabel} onOpenMonth={()=>{setMonthDraft(month);setShowMonthPicker(true)}}/>
       {notice && <StatusNotice message={notice} tone={notice.startsWith("Não") || notice.includes("inválid") ? "error" : "success"} onClose={() => setNotice("")}/>}
