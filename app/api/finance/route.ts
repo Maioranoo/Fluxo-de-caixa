@@ -2,8 +2,8 @@ import { and, asc, eq, gte, isNull, lt, or, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { AccessError, requireHousehold } from "../../../db/tenancy";
 import { categories, categoryRules, expenses, householdMembers, households, importBatches, incomes, paymentMethods } from "../../../db/schema";
-import { isCategoryKind, isValidDateInput, isValidMonthInput, normalizeCategoryName, normalizeDescription, normalizePaymentName, parseInstallments, parseMoneyInput, parsePositiveSafeInteger } from "../../lib/validation";
-import { assertSameSite } from "../security";
+import { isCategoryKind, isValidDateInput, isValidMonthInput, normalizeCategoryName, normalizeDescription, normalizeImportedDescription, normalizePaymentName, parseInstallments, parseMoneyInput, parsePositiveSafeInteger } from "../../lib/validation";
+import { assertSameSite, readJsonObject } from "../security";
 import { normalizeMerchant } from "../../lib/imports/fingerprint.ts";
 
 export async function GET(request: Request) {
@@ -33,7 +33,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     assertSameSite(request);
-    const context = await requireHousehold(request), body = await request.json() as Record<string, unknown>, db = getDb();
+    const context = await requireHousehold(request), body = await readJsonObject(request), db = getDb();
     if (body.type === "income") {
       const [household] = await db.select({ allowIncome: households.allowIncome }).from(households).where(eq(households.id, context.householdId)).limit(1);
       if (!household?.allowIncome) return Response.json({ error: "Entradas não estão habilitadas para esta família." }, { status: 403 });
@@ -93,16 +93,22 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     assertSameSite(request);
-    const context = await requireHousehold(request), body = await request.json() as Record<string, unknown>, db = getDb();
+    const context = await requireHousehold(request), body = await readJsonObject(request), db = getDb();
     if (body.type === "expense") {
       const id = parsePositiveSafeInteger(body.id), amountCents = parseMoneyInput(body.amount), categoryId = parsePositiveSafeInteger(body.categoryId), description = normalizeDescription(body.description);
       const [currentExpense] = id ? await db.select({ amountCents: expenses.amountCents, importBatchId: expenses.importBatchId, referenceMonth: expenses.referenceMonth }).from(expenses).where(and(eq(expenses.id, id), eq(expenses.householdId, context.householdId))).limit(1) : [];
       const imported = Boolean(currentExpense?.importBatchId);
-      const importedDescription = imported && (body.description === null || body.description === "") ? null : description;
+      const importedDescription = imported ? normalizeImportedDescription(body.description) : description;
+      if (imported && body.description != null && body.description !== "" && !importedDescription) return invalid("Descrição inválida.");
+      if (imported && body.referenceMonth != null && !isValidMonthInput(body.referenceMonth)) return invalid("Mês de referência inválido.");
       const [ownedCategory] = categoryId ? await db.select({ id: categories.id, name: categories.name }).from(categories).where(and(eq(categories.id, categoryId), eq(categories.householdId, context.householdId), eq(categories.kind, "expense"))).limit(1) : [];
       const [ownedPayment] = typeof body.paymentMethod === "string" && body.paymentMethod ? await db.select({ key: paymentMethods.key }).from(paymentMethods).where(and(eq(paymentMethods.key, body.paymentMethod), eq(paymentMethods.householdId, context.householdId))).limit(1) : [];
       const allowedPeople = await db.select({ name: householdMembers.displayName }).from(householdMembers).where(eq(householdMembers.householdId, context.householdId));
       if (!id || !currentExpense) return invalid("Gasto inválido.");
+      if (imported && body.categoryId != null && body.categoryId !== "" && !ownedCategory) return invalid("Categoria inválida.");
+      if (imported && body.paymentMethod != null && body.paymentMethod !== "" && !ownedPayment) return invalid("Pagamento inválido.");
+      if (body.occurredAt != null && body.occurredAt !== "" && !isValidDateInput(body.occurredAt)) return invalid("Data inválida.");
+      if (body.person != null && body.person !== "" && (typeof body.person !== "string" || !allowedPeople.some(person => person.name === body.person))) return invalid("Integrante inválido.");
       if (!amountCents) return invalid("Informe um valor entre R$ 0,01 e R$ 999.999.999,99, com no máximo dois centavos.");
       if (!importedDescription && !imported) return invalid("A descrição deve conter letras e ter no máximo 160 caracteres.");
       if ((!ownedCategory || !ownedPayment) && !imported) return invalid("Selecione categoria e pagamento válidos.");
@@ -203,7 +209,7 @@ export async function DELETE(request: Request) {
   } catch (error) { return accessResponse(error); }
 }
 
-function accessResponse(error: unknown) { if (error instanceof AccessError) return Response.json({ error: error.message }, { status: error.status }); console.error(error); return Response.json({ error: "Não foi possível acessar os dados agora." }, { status: 500 }); }
+function accessResponse(error: unknown) { if (error instanceof AccessError) return Response.json({ error: error.message }, { status: error.status, headers: error.headers }); console.error("Request failed"); return Response.json({ error: "Não foi possível acessar os dados agora." }, { status: 500 }); }
 function invalid(error: string) { return Response.json({ error }, { status: 400 }); }
 function nextMonth(month: string) { const [year, m] = month.split("-").map(Number); const d = new Date(year, m, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`; }
 function addMonths(date: string, offset: number) { const [year, month, day] = date.split("-").map(Number); const first = new Date(Date.UTC(year, month - 1 + offset, 1)); const lastDay = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate(); return `${first.getUTCFullYear()}-${String(first.getUTCMonth() + 1).padStart(2, "0")}-${String(Math.min(day, lastDay)).padStart(2, "0")}`; }

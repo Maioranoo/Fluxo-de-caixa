@@ -30,6 +30,10 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+.dev.vars*
+*.key
+*.p12
+*.pfx
 *.log
 *.log
 *.log
@@ -46,4 +50,5 @@ next-env.d.ts
 /site-build.tar.gz
 .site-package-stage/
 /.superpowers/
+/tmp/security-audit/
 /.impeccable/engine/

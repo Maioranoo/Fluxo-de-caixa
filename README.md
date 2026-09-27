@@ -137,6 +137,20 @@ A interface adapta a navegação, os formulários, os indicadores e as tabelas p
 - Integrantes só acessam a família à qual estão vinculados.
 - Valores, datas, categorias, pessoas e formas de pagamento são validados no servidor.
 
+### Proteções e configuração de segurança
+
+- Segredos de produção pertencem aos **secrets de runtime do Worker**, acessados no backend por `env` de `cloudflare:workers`. Não coloque valores em `vars`, no código, no build do navegador ou em `.openai/hosting.json`.
+- `.env*`, `.dev.vars*` e arquivos de chaves são ignorados pelo Git. O build rejeita variáveis `VITE_*` e `NEXT_PUBLIC_*`; módulos de banco/autenticação usam `server-only`.
+- O administrador local é habilitado somente na configuração de desenvolvimento. O build gera `LOCAL_ADMIN_ENABLED=false`.
+- Todos os pedidos que chegam ao Worker compartilham uma cota de **300/min por IP**. APIs têm **120/min**, escritas **30/min** e POSTs de importação **10/min**, compartilhados entre as rotas. Integrantes autenticados também têm essas cotas por integrante, independentemente da família selecionada ou IP.
+- Contadores atômicos ficam no D1. O excesso retorna `429` e `Retry-After`; indisponibilidade do contador retorna `503`. A janela é fixa de 60 segundos, com possível rajada na mudança de janela.
+- JSON é limitado a 64 KiB nas APIs comuns e 10 MiB nas importações, contando os bytes recebidos. Campos são validados no servidor; SQL usa Drizzle ou parâmetros vinculados com `.bind()`.
+- Não há modelo de IA nem execução de prompts: o classificador de importações usa regras locais. Não existe um filtro genérico que garanta proteção contra prompt injection em uma futura integração com IA.
+
+**Antes de publicar estas alterações:** aplique `drizzle/0006_request_rate_limits.sql` no D1 de destino junto das migrações anteriores. Sem essa tabela, o Worker recusa os pedidos com `503`. Confirme também que o proxy de autenticação substitui os cabeçalhos `oai-authenticated-*` e `CF-Connecting-IP`, e que o Worker não pode ser acessado diretamente fora desse proxy. Rotas de login/callback e assets servidos pela plataforma antes do Worker precisam de limites no próprio proxy/WAF.
+
+Auditoria reproduzível: `node scripts/audit-secrets.mjs --history`. O script mostra apenas os locais de possíveis credenciais; ele usa heurísticas e não inspeciona os secrets da hospedagem. Consulte [o relatório de segurança](docs/security-audit-2026-09-25.md) para escopo, testes e pendências.
+
 ## Deploy
 
 O projeto está configurado para publicação no **Sites**, com aplicação server-side executada sobre Cloudflare Workers e persistência no Cloudflare D1.

@@ -1,5 +1,6 @@
 import vinext from "vinext";
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
+import { assertPrivateEnvironment } from "./build/environment-policy.ts";
 import hostingConfig from "./.openai/hosting.json" with { type: "json" };
 import { sites } from "./build/sites-vite-plugin.ts";
 
@@ -14,7 +15,6 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
-  vars: { LOCAL_ADMIN_ENABLED: "true" },
   d1_databases: d1
     ? [
         {
@@ -34,7 +34,8 @@ const localBindingConfig = {
     : [],
 };
 
-export default defineConfig(async () => {
+export default defineConfig(async ({ command, mode }) => {
+  assertPrivateEnvironment({ ...loadEnv(mode, process.cwd(), ""), ...process.env });
   // Keep Wrangler and Miniflare state project-local. These are non-secret tool
   // settings; application environment belongs in ignored `.env*` files.
   process.env.WRANGLER_WRITE_LOGS ??= "false";
@@ -45,6 +46,7 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
+    envPrefix: [],
     server: isCodexSeatbeltSandbox
       ? { watch: { useFsEvents: false, usePolling: true } }
       : undefined,
@@ -53,7 +55,7 @@ export default defineConfig(async () => {
       sites(),
       cloudflare({
         viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
-        config: localBindingConfig,
+        config: { ...localBindingConfig, vars: { LOCAL_ADMIN_ENABLED: command === "serve" ? "true" : "false" } },
       }),
     ],
   };

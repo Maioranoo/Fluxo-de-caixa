@@ -2,16 +2,19 @@ import { and, asc, eq, isNull, ne, notExists, or, sql } from "drizzle-orm";
 import { getD1, getDb } from "../../../db";
 import { AccessError, requireHousehold } from "../../../db/tenancy";
 import { categories, categoryRules, expenses, householdMembers, importBatchCategories, importBatches, incomes, paymentMethods } from "../../../db/schema";
-import { assertSameSite } from "../security";
+import { assertSameSite, readJsonObject } from "../security";
 import { normalizeMerchant } from "../../lib/imports/fingerprint.ts";
-import { MAX_IMPORT_ROWS, validateImportPayload } from "../../lib/imports/validation.ts";
-import { normalizeCategoryName } from "../../lib/validation.ts";
+import { MAX_IMPORT_BYTES, MAX_IMPORT_ROWS, validateImportPayload } from "../../lib/imports/validation.ts";
+import { isValidMonthInput, normalizeCategoryName, parsePositiveSafeInteger } from "../../lib/validation.ts";
 
 export async function GET(request: Request) {
   try {
     const context = await requireHousehold(request);
     const url = new URL(request.url);
     const batchId = positiveId(url.searchParams.get("batchId"));
+    if (url.searchParams.has("batchId") && !batchId) return Response.json({ error: "Importação inválida." }, { status: 400 });
+    const requestedPage = url.searchParams.get("page");
+    if (requestedPage !== null && (!positiveId(requestedPage) || Number(requestedPage) > 1000000)) return Response.json({ error: "Página inválida." }, { status: 400 });
     if (batchId) {
       const page = Math.max(1, positiveId(url.searchParams.get("page")) ?? 1);
       const pageSize = 50;
@@ -21,6 +24,7 @@ export async function GET(request: Request) {
       return Response.json({ items, page, pageSize });
     }
     const month = url.searchParams.get("month");
+    if (month !== null && !isValidMonthInput(month)) return Response.json({ error: "Mês inválido." }, { status: 400 });
     const conditions = month ? and(eq(importBatches.householdId, context.householdId), eq(importBatches.referenceMonth, month)) : eq(importBatches.householdId, context.householdId);
     const batches = await getDb().select().from(importBatches).where(conditions).orderBy(sql`${importBatches.createdAt} desc`, sql`${importBatches.id} desc`);
     return Response.json({ batches });
@@ -33,7 +37,7 @@ export async function POST(request: Request) {
   try {
     assertSameSite(request);
     const context = await requireHousehold(request);
-    const payload = validateImportPayload(await request.json());
+    const payload = validateImportPayload(await readJsonObject(request, MAX_IMPORT_BYTES));
     if (!payload.ok) return Response.json({ error: payload.error }, { status: 400 });
     if (payload.value.rows.length > MAX_IMPORT_ROWS) return Response.json({ error: "O arquivo deve ter no máximo 5.000 linhas." }, { status: 400 });
     const selected = payload.value.rows.filter(row => row.selected);
@@ -46,6 +50,8 @@ export async function POST(request: Request) {
     const categoryIds = new Set(ownedCategories.map(item => item.id));
     const paymentKeys = new Set(ownedPayments.map(item => item.key));
     const memberNames = new Set(ownedMembers.map(item => item.name));
+    if (payload.value.defaultPaymentMethod && !paymentKeys.has(payload.value.defaultPaymentMethod)) return Response.json({ error: "Pagamento padrão inválido." }, { status: 400 });
+    if (payload.value.defaultPerson && !memberNames.has(payload.value.defaultPerson)) return Response.json({ error: "Integrante padrão inválido." }, { status: 400 });
     const knownCategoryNames = new Map(ownedCategories.map(item => [item.name.toLocaleLowerCase("pt-BR"), item]));
     const batchId = randomSafeId();
     const newCategories = new Map<string, { id: number; name: string }>();
@@ -138,12 +144,11 @@ function chunks<T>(values: T[], size: number) {
 }
 
 function positiveId(value: unknown) {
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+  return parsePositiveSafeInteger(value);
 }
 
 function routeError(error: unknown) {
-  if (error instanceof AccessError) return Response.json({ error: error.message }, { status: error.status });
-  console.error("Import operation failed", error);
+  if (error instanceof AccessError) return Response.json({ error: error.message }, { status: error.status, headers: error.headers });
+  console.error("Import operation failed");
   return Response.json({ error: "Não foi possível concluir a operação de importação." }, { status: 500 });
 }

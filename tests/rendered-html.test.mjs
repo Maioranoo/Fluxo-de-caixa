@@ -59,7 +59,7 @@ test("banco separa famílias e possui índices para as consultas principais", as
   assert.match(schema, /idx_expenses_household_payment_date/);
   assert.match(tenancy, /oai-authenticated-user-id/);
   assert.match(tenancy, /oai-authenticated-user-email/);
-  assert.match(tenancy, /if \(!email\)/);
+  assert.match(tenancy, /if \(!email \|\| !userId/);
   assert.match(tenancy, /userId \? or/);
   assert.doesNotMatch(tenancy, /if \(!email \|\| !userId\)/);
   assert.match(tenancy, /LOCAL_ADMIN_ENABLED === "true"/);
@@ -135,7 +135,7 @@ test("integrantes só podem ser gerenciados pelo administrador na carteira selec
 test("privacidade, data local e salvamento protegido estão ativos", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const api = await readFile(new URL("../app/api/finance/route.ts", import.meta.url), "utf8");
-  const security = await readFile(new URL("../app/api/security.ts", import.meta.url), "utf8");
+  const security = await readFile(new URL("../app/lib/server/http-security.ts", import.meta.url), "utf8");
   assert.match(api, /context\.isAdmin \? member/);
   assert.match(page, /date\.getFullYear\(\)/);
   assert.doesNotMatch(page, /toISOString\(\)\.slice\(0, 10\)/);

@@ -8,7 +8,7 @@ import { ExpenseTable, IncomeTable } from "./components/transactions";
 import { DialogFrame, Empty, IconButton, LoadingSkeleton, Panel, StatusNotice } from "./components/ui";
 import { ImportWorkspace } from "./components/imports/import-workspace";
 import { formatMoney, groupExpenseCategories, groupTotals, type Category, type CategoryFilter, type CategoryKind, type Expense, type FinanceData, type Household, type Income, type Member, type Payment } from "./lib/finance-ui";
-import { MAX_CATEGORY_LENGTH, MAX_DESCRIPTION_LENGTH, MAX_EMAIL_LENGTH, MAX_INSTALLMENTS, MAX_MEMBERS, MAX_NAME_LENGTH, isValidDateInput, isValidMonthInput, normalizeCategoryName, normalizeDescription, normalizeEmail, normalizeName, normalizePaymentName, parseInstallments, parseMoneyInput, validateMembers } from "./lib/validation";
+import { MAX_CATEGORY_LENGTH, MAX_DESCRIPTION_LENGTH, MAX_EMAIL_LENGTH, MAX_INSTALLMENTS, MAX_MEMBERS, MAX_NAME_LENGTH, isValidDateInput, isValidMonthInput, normalizeCategoryName, normalizeDescription, normalizeImportedDescription, normalizeEmail, normalizeName, normalizePaymentName, parseInstallments, parseMoneyInput, validateMembers } from "./lib/validation";
 type AccessError = { status: number; message: string };
 
 const monthKey = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
@@ -236,7 +236,8 @@ export default function Home() {
 
   async function updateExpense(event: React.FormEvent) {
     event.preventDefault();
-    const amountCents = parseMoneyInput(expenseEdit.amount), description = normalizeDescription(expenseEdit.description);
+    const amountCents = parseMoneyInput(expenseEdit.amount), description = expenseEdit.imported ? normalizeImportedDescription(expenseEdit.description) : normalizeDescription(expenseEdit.description);
+    if (expenseEdit.imported && expenseEdit.description.trim() && !description) return setNotice("A descrição deve ter no máximo 160 caracteres e não conter caracteres de controle.");
     if (!amountCents) return setNotice("Informe um valor entre R$ 0,01 e R$ 999.999.999,99, com no máximo duas casas decimais.");
     if (!expenseEdit.imported && !description) return setNotice("A descrição deve conter letras e ter no máximo 160 caracteres.");
     if (!expenseEdit.imported && !expenseCategories.some(category => String(category.id) === expenseEdit.categoryId)) return setNotice("Selecione uma categoria de gasto válida.");

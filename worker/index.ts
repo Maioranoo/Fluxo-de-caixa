@@ -1,6 +1,8 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { AccessError } from "../app/lib/server/http-security.ts";
+import { cleanupRateLimits, clientIdentity, enforceRateLimit, requestPolicies } from "../app/lib/server/rate-limit.ts";
 
 interface Env {
   ASSETS: Fetcher;
@@ -28,6 +30,15 @@ interface ExecutionContext {
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    try {
+      await enforceRateLimit(env.DB, clientIdentity(request), requestPolicies(request));
+    } catch (error) {
+      if (error instanceof AccessError) return Response.json({ error: error.message }, { status: error.status, headers: error.headers });
+      return Response.json({ error: "Proteção de acesso indisponível." }, { status: 503 });
+    }
+    // Indexed, bounded housekeeping; no unbounded in-memory identity map.
+    if (Math.random() < 0.01) ctx.waitUntil(cleanupRateLimits(env.DB).catch(() => {}));
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];

@@ -1,6 +1,12 @@
 import { sql } from "drizzle-orm";
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
+export const requestRateLimits = sqliteTable("request_rate_limits", {
+  bucketKey: text("bucket_key").primaryKey(),
+  hits: integer("hits").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+}, t => [index("idx_request_rate_limits_expires").on(t.expiresAt)]);
+
 export const households = sqliteTable("households", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),

@@ -10,15 +10,24 @@ export const MAX_INPUT_YEAR = 2200;
 
 const hasLetter = (value: string) => /\p{L}/u.test(value);
 
-function normalizeText(value: unknown, maximumLength: number) {
+export function normalizePlainText(value: unknown, maximumLength: number) {
   if (typeof value !== "string") return null;
-  const normalized = value.trim().replace(/\s+/g, " ");
-  return normalized.length > 0 && normalized.length <= maximumLength && hasLetter(normalized) ? normalized : null;
+  // Allow normal whitespace; reject invisible controls and bidi overrides.
+  // Text remains literal data; SQL safety comes from bound parameters, not stripping quotes.
+  if (/[\p{Cc}\p{Cf}]/u.test(value.replace(/[\t\r\n]/g, ""))) return null;
+  const normalized = value.normalize("NFC").trim().replace(/\s+/g, " ");
+  return normalized.length > 0 && normalized.length <= maximumLength ? normalized : null;
+}
+
+function normalizeText(value: unknown, maximumLength: number) {
+  const normalized = normalizePlainText(value, maximumLength);
+  return normalized && hasLetter(normalized) ? normalized : null;
 }
 
 export const normalizeCategoryName = (value: unknown) => normalizeText(value, MAX_CATEGORY_LENGTH);
 export const normalizePaymentName = (value: unknown) => normalizeText(value, MAX_CATEGORY_LENGTH);
 export const normalizeDescription = (value: unknown) => normalizeText(value, MAX_DESCRIPTION_LENGTH);
+export const normalizeImportedDescription = (value: unknown) => normalizePlainText(value, MAX_DESCRIPTION_LENGTH);
 export const normalizeName = (value: unknown) => normalizeText(value, MAX_NAME_LENGTH);
 
 export function normalizeEmail(value: unknown) {
@@ -33,7 +42,7 @@ export function normalizeEmail(value: unknown) {
 }
 
 export function parseMoneyInput(value: unknown) {
-  if (typeof value !== "string") return null;
+  if (typeof value !== "string" || value.length > 40) return null;
   const cleaned = value.replace(/^R\$\s*/i, "").trim();
   if (!cleaned || /[+\-eE]/.test(cleaned)) return null;
 

@@ -1,8 +1,12 @@
+import "server-only";
 import { env } from "cloudflare:workers";
 import { eq, isNull, or } from "drizzle-orm";
-import { getDb } from ".";
+import { getDb, getD1 } from ".";
 import { categories, expenses, householdMembers, households, paymentMethods } from "./schema";
-import { parsePositiveSafeInteger } from "../app/lib/validation";
+import { normalizeEmail, parsePositiveSafeInteger } from "../app/lib/validation";
+import { AccessError } from "../app/lib/server/http-security.ts";
+import { enforceRateLimit, requestPolicies } from "../app/lib/server/rate-limit.ts";
+export { AccessError } from "../app/lib/server/http-security.ts";
 
 type RuntimeConfig = {
   INITIAL_HOUSEHOLD_NAME?: string;
@@ -20,17 +24,15 @@ export type HouseholdContext = {
   isAdmin: boolean;
 };
 
-export class AccessError extends Error {
-  constructor(message: string, public status: number) { super(message); }
-}
-
 export async function requireHousehold(request: Request): Promise<HouseholdContext> {
   const config = env as unknown as RuntimeConfig;
   const hostname = new URL(request.url).hostname;
   const local = config.LOCAL_ADMIN_ENABLED === "true" && (hostname === "localhost" || hostname === "127.0.0.1");
   const email = request.headers.get("oai-authenticated-user-email")?.trim().toLowerCase() || (local ? "admin-local@localhost" : undefined);
   const userId = request.headers.get("oai-authenticated-user-id")?.trim() || (local ? "admin-local" : undefined);
-  if (!email) throw new AccessError("Faça login para acessar esta carteira.", 401);
+  if (!email || !userId || !normalizeEmail(email) || userId.length > 256) throw new AccessError("Faça login para acessar esta carteira.", 401);
+  const householdHeader = request.headers.get("x-household-id");
+  if (householdHeader !== null && !parsePositiveSafeInteger(householdHeader)) throw new AccessError("Família inválida.", 400);
 
   const db = getDb();
   let [member] = await db.select({
@@ -52,6 +54,8 @@ export async function requireHousehold(request: Request): Promise<HouseholdConte
       .where(eq(householdMembers.email, email)).limit(1);
   }
   if (!member) throw new AccessError("Seu e-mail ainda não foi vinculado a uma família.", 403);
+
+  await enforceRateLimit(getD1(), `member:${member.memberId}`, requestPolicies(request));
 
   if (userId) await db.update(householdMembers).set({ userId }).where(eq(householdMembers.id, member.memberId));
   const isAdmin = local || email === config.ADMIN_EMAIL?.trim().toLowerCase();

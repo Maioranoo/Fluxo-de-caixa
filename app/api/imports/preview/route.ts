@@ -2,17 +2,17 @@ import { and, eq, isNotNull } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { AccessError, requireHousehold } from "../../../../db/tenancy";
 import { categories, categoryRules, expenses, importBatches } from "../../../../db/schema";
-import { assertSameSite } from "../../security";
+import { assertSameSite, readJsonObject } from "../../security";
 import { classifyExpense } from "../../../lib/imports/classifier.ts";
 import { fingerprintImportRow, normalizeMerchant } from "../../../lib/imports/fingerprint.ts";
-import { validatePreviewPayload } from "../../../lib/imports/validation.ts";
+import { MAX_IMPORT_BYTES, validatePreviewPayload } from "../../../lib/imports/validation.ts";
 import type { ImportRowWarning, PreviewImportRow } from "../../../lib/imports/types.ts";
 
 export async function POST(request: Request) {
   try {
     assertSameSite(request);
     const context = await requireHousehold(request);
-    const payload = validatePreviewPayload(await request.json());
+    const payload = validatePreviewPayload(await readJsonObject(request, MAX_IMPORT_BYTES));
     if (!payload.ok) return Response.json({ error: payload.error }, { status: 400 });
     const db = getDb();
     const [categoryRows, learnedRows, historyRows, fingerprintRows, matchingFiles] = await Promise.all([
@@ -74,7 +74,7 @@ function uniqueWarnings(warnings: ImportRowWarning[]) {
 }
 
 function routeError(error: unknown) {
-  if (error instanceof AccessError) return Response.json({ error: error.message }, { status: error.status });
-  console.error("Import preview failed", error);
+  if (error instanceof AccessError) return Response.json({ error: error.message }, { status: error.status, headers: error.headers });
+  console.error("Import preview failed");
   return Response.json({ error: "Não foi possível preparar a conferência do arquivo." }, { status: 500 });
 }

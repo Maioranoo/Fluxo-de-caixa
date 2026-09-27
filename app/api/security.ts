@@ -1,7 +1,1 @@
-import { AccessError } from "../../db/tenancy";
-
-export function assertSameSite(request: Request) {
-  if (request.headers.get("sec-fetch-site") === "cross-site") {
-    throw new AccessError("Solicitação externa bloqueada.", 403);
-  }
-}
+export { assertSameSite, readJsonObject } from "../lib/server/http-security.ts";

@@ -3,9 +3,9 @@ import { getDb } from "../../../../db";
 import { AccessError, requireHousehold } from "../../../../db/tenancy";
 import { householdMembers, households } from "../../../../db/schema";
 import { MAX_MEMBERS, normalizeEmail, normalizeName, parsePositiveSafeInteger, validateMembers } from "../../../lib/validation";
-import { assertSameSite } from "../../security";
+import { assertSameSite, readJsonObject } from "../../security";
 
-type NewMember = { name?: string; email?: string };
+type NewMember = { name?: unknown; email?: unknown };
 
 export async function GET(request: Request) {
   try {
@@ -19,7 +19,7 @@ export async function POST(request: Request) {
   try {
     assertSameSite(request);
     const context = await requireAdmin(request);
-    const body = await request.json() as { type?: string; name?: string; email?: string; members?: NewMember[]; allowIncome?: boolean };
+    const body = await readJsonObject(request);
     if (body.type === "member") {
       const memberCount = await getDb().select({ id: householdMembers.id }).from(householdMembers).where(eq(householdMembers.householdId, context.householdId));
       if (memberCount.length >= MAX_MEMBERS) return Response.json({ error: `Uma família pode ter no máximo ${MAX_MEMBERS} integrantes.` }, { status: 400 });
@@ -54,7 +54,7 @@ export async function PATCH(request: Request) {
   try {
     assertSameSite(request);
     const context = await requireAdmin(request);
-    const body = await request.json() as { type?: string; id?: number; name?: string; email?: string; householdId?: number; allowIncome?: boolean };
+    const body = await readJsonObject(request);
     if (body.type === "member") {
       const id = parsePositiveSafeInteger(body.id), member = normalizeMember(body), db = getDb();
       if (!id || !member) return Response.json({ error: "O nome deve conter letras e ter até 80 caracteres; informe também um email válido." }, { status: 400 });
@@ -102,7 +102,7 @@ function normalizeMember(input: NewMember) {
 }
 
 function errorResponse(error: unknown) {
-  if (error instanceof AccessError) return Response.json({ error: error.message }, { status: error.status });
-  console.error(error);
+  if (error instanceof AccessError) return Response.json({ error: error.message }, { status: error.status, headers: error.headers });
+  console.error("Request failed");
   return Response.json({ error: "Não foi possível atualizar o painel administrativo agora." }, { status: 500 });
 }
