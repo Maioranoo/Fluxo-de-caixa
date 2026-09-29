@@ -159,6 +159,16 @@ O projeto está configurado para publicação no **Sites**, com aplicação serv
 
 O ambiente publicado possui acesso controlado; somente integrantes autorizados conseguem abrir uma carteira.
 
+## SEO e descoberta por IA
+
+- `public/robots.txt` permite rastrear a página inicial e os recursos públicos, exclui `/api/` e aponta para o sitemap.
+- `public/sitemap.xml` lista a única URL de página existente: `/`. As abas internas não possuem URLs independentes.
+- `app/layout.tsx` define título, descrição, canonical absoluto e metadados sociais para o domínio oficial, sem depender do cabeçalho Host.
+- A página 404 possui título e descrição próprios, `noindex` e nenhum canonical.
+- `public/llms.txt` descreve o produto, suas URLs e as restrições de acesso aos dados.
+
+Ao adicionar páginas públicas, defina seus metadados e canonical e atualize o sitemap e o llms.txt. Se o domínio mudar, atualize os quatro arquivos que contêm o domínio oficial. A indexação depende de a hospedagem permitir acesso anônimo à página inicial e aos arquivos de descoberta; estes arquivos não removem a autenticação da plataforma. Não inclua APIs, dados privados ou páginas protegidas no sitemap.
+
 ## Status
 
 > Em desenvolvimento e recebendo melhorias contínuas.

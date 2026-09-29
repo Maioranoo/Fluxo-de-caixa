@@ -1,12 +1,25 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
 import "./globals.css";
 
-export async function generateMetadata(): Promise<Metadata> {
-  const h = await headers();
-  const host = h.get("host") ?? "localhost:3000";
-  const protocol = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  const image = `${protocol}://${host}/og.png`;
-  return { title: "Finanças da Família", description: "Controle compartilhado de gastos da família.", icons: { icon: "/favicon.svg" }, openGraph: { title: "Finanças da Família", description: "Controle simples. Decisões tranquilas.", images: [image] }, twitter: { card: "summary_large_image", images: [image] } };
-}
+const siteUrl = "https://painel-financas.maioranoo.chatgpt.site";
+const title = "Finanças da Família | Controle financeiro familiar";
+const description = "Organize as finanças da família: acompanhe gastos, receitas, parcelas e saldo mensal, importe extratos e consulte relatórios em um painel compartilhado.";
+
+export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
+  title,
+  description,
+  alternates: { canonical: `${siteUrl}/` },
+  icons: { icon: "/favicon.svg" },
+  openGraph: {
+    type: "website",
+    locale: "pt_BR",
+    siteName: "Finanças da Família",
+    url: `${siteUrl}/`,
+    title,
+    description,
+    images: [`${siteUrl}/og.png`],
+  },
+  twitter: { card: "summary_large_image", title, description, images: [`${siteUrl}/og.png`] },
+};
 export default function RootLayout({children}:{children:React.ReactNode}) { return <html lang="pt-BR"><body>{children}</body></html>; }

@@ -1,0 +1,20 @@
+# Finanças da Família
+
+> Aplicação em português para controle financeiro familiar compartilhado, com acesso aos dados restrito a integrantes autorizados.
+
+O painel permite acompanhar gastos por mês, categoria e forma de pagamento, controlar parcelas de cartão, importar extratos e planilhas e imprimir relatórios. O acompanhamento de receitas e saldo depende da configuração da família.
+
+## Página principal
+
+- [Finanças da Família](https://painel-financas.maioranoo.chatgpt.site/): entrada do painel financeiro. O uso das carteiras exige autenticação e autorização.
+
+## Descoberta do site
+
+- [Sitemap](https://painel-financas.maioranoo.chatgpt.site/sitemap.xml): relação das URLs de páginas destinadas à indexação.
+- [Robots](https://painel-financas.maioranoo.chatgpt.site/robots.txt): orientações de rastreamento.
+
+## Estrutura e acesso
+
+O site possui uma única URL de página. Resumo, gastos, entradas, categorias, formas de pagamento, relatórios e administração são visualizações internas do painel, não páginas públicas independentes.
+
+As APIs em /api/ acessam recursos protegidos e não são fontes públicas de dados. Este arquivo descreve apenas as funcionalidades do produto; não contém informações financeiras, dados de integrantes ou credenciais e não concede acesso a esses recursos.
