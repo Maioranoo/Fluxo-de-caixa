@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppSidebar, MobileNavigation, PageHeader, type NavigationItem } from "./components/app-shell";
 import { Bars, FinancialSummary, Metric } from "./components/finance-summary";
 import { Icon } from "./components/icons";
+import { BrandMark } from "./components/brand-mark";
+import { BrandLoading } from "./components/brand-loading";
 import { ExpenseTable, IncomeTable } from "./components/transactions";
 import { DialogFrame, Empty, IconButton, LoadingSkeleton, Panel, StatusNotice } from "./components/ui";
 import { ImportWorkspace } from "./components/imports/import-workspace";
@@ -26,6 +28,7 @@ export default function Home() {
   const selectedHousehold = householdSelection.selectedId;
   const requestedHousehold = householdSelection.requestedId;
   const [loading, setLoading] = useState(true);
+  const [minimumOpeningElapsed, setMinimumOpeningElapsed] = useState(false);
   const [notice, setNotice] = useState("");
   const [accessError, setAccessError] = useState<AccessError | null>(null);
   const [form, setForm] = useState({ amount: "", description: "", categoryId: "", paymentMethod: "", installments: "1", person: "", occurredAt: today() });
@@ -62,6 +65,11 @@ export default function Home() {
     if (!data.household?.allowIncome) return expenseCategories;
     return categoryFilter === "all" ? data.categories : data.categories.filter(category => category.kind === categoryFilter);
   }, [categoryFilter, data.categories, data.household?.allowIncome, expenseCategories]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setMinimumOpeningElapsed(true), 1500);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -318,7 +326,9 @@ export default function Home() {
     setMonth(monthDraft); setShowMonthPicker(false);
   }
 
-  if (accessError) return <main className="access-page"><section className="access-card"><span className="access-code">{accessError.status}</span><div className="access-mark">F</div><p>FINANÇAS DA FAMÍLIA</p><h1>{accessError.status === 401 ? "Login necessário" : "Acesso não autorizado"}</h1><p>{accessError.message}</p><small>Peça ao administrador para cadastrar nesta carteira o e-mail da conta usada para entrar.</small><button className="primary" type="button" onClick={()=>window.location.reload()}>Tentar novamente</button></section></main>;
+  if (loading || !minimumOpeningElapsed) return <BrandLoading/>;
+
+  if (accessError) return <main className="access-page"><section className="access-card"><span className="access-code">{accessError.status}</span><div className="access-mark"><BrandMark size={48}/></div><p>FINANÇAS DA FAMÍLIA</p><h1>{accessError.status === 401 ? "Login necessário" : "Acesso não autorizado"}</h1><p>{accessError.message}</p><small>Peça ao administrador para cadastrar nesta carteira o e-mail da conta usada para entrar.</small><button className="primary" type="button" onClick={()=>window.location.reload()}>Tentar novamente</button></section></main>;
 
   const monthLabelRaw = new Date(`${month}-02T12:00:00`).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
   const monthLabel = monthLabelRaw.charAt(0).toUpperCase() + monthLabelRaw.slice(1);

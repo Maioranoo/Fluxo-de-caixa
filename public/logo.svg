@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 285 80" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Finanças da Família</title>
+  <desc id="desc">Uma casa com três barras crescentes representa o cuidado com as finanças da família.</desc>
+  <rect y="8" width="64" height="64" rx="18" fill="#112c25"/>
+  <g transform="translate(0 8)" stroke="#e4eeab" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M16 30 32 16l16 14"/>
+    <path d="M20 45v-6m12 6V33m12 12V29"/>
+  </g>
+  <text x="82" y="42" fill="#112c25" font-family="Inter,Arial,sans-serif" font-size="32" font-weight="700" letter-spacing="-1.2">Finanças</text>
+  <text x="84" y="64" fill="#176a52" font-family="Inter,Arial,sans-serif" font-size="17" font-weight="500" letter-spacing="2">da família</text>
+</svg>
