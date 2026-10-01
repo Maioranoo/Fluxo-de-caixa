@@ -85,6 +85,7 @@ export const importBatchCategories = sqliteTable("import_batch_categories", {
 
 export const expenses = sqliteTable("expenses", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  installmentGroupId: text("installment_group_id"),
   householdId: integer("household_id").references(() => households.id),
   amountCents: integer("amount_cents").notNull(),
   description: text("description"),
@@ -103,6 +104,7 @@ export const expenses = sqliteTable("expenses", {
   index("idx_expenses_household_reference_month").on(t.householdId, t.referenceMonth),
   index("idx_expenses_household_fingerprint").on(t.householdId, t.importFingerprint),
   index("idx_expenses_import_batch").on(t.importBatchId),
+  index("idx_expenses_household_installments").on(t.householdId, t.installmentGroupId),
 ]);
 
 export const incomes = sqliteTable("incomes", {

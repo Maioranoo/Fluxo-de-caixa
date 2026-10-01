@@ -5,6 +5,7 @@ import { categories, categoryRules, expenses, householdMembers, households, impo
 import { isCategoryKind, isValidDateInput, isValidMonthInput, normalizeCategoryName, normalizeDescription, normalizeImportedDescription, normalizePaymentName, parseInstallments, parseMoneyInput, parsePositiveSafeInteger } from "../../lib/validation";
 import { assertSameSite, readJsonObject } from "../security";
 import { normalizeMerchant } from "../../lib/imports/fingerprint.ts";
+import { expenseDeletionFilter } from "../../lib/server/expense-deletion.ts";
 
 export async function GET(request: Request) {
   try {
@@ -14,7 +15,7 @@ export async function GET(request: Request) {
     const start = `${month}-01`, end = nextMonth(month), db = getDb();
     const [categoryRows, expenseRows, incomeRows, memberRows, paymentRows, householdRows, currentHouseholdRows] = await Promise.all([
       db.select({ id: categories.id, name: categories.name, kind: categories.kind }).from(categories).where(eq(categories.householdId, context.householdId)).orderBy(asc(categories.name)),
-      db.select({ id: expenses.id, amountCents: expenses.amountCents, description: expenses.description, categoryId: expenses.categoryId, category: categories.name, paymentMethod: expenses.paymentMethod, person: expenses.person, occurredAt: expenses.occurredAt, referenceMonth: expenses.referenceMonth, importBatchId: expenses.importBatchId })
+      db.select({ id: expenses.id, amountCents: expenses.amountCents, description: expenses.description, categoryId: expenses.categoryId, category: categories.name, paymentMethod: expenses.paymentMethod, person: expenses.person, occurredAt: expenses.occurredAt, referenceMonth: expenses.referenceMonth, importBatchId: expenses.importBatchId, installmentGroupId: expenses.installmentGroupId })
         .from(expenses).leftJoin(categories, and(eq(expenses.categoryId, categories.id), eq(categories.householdId, context.householdId)))
         .where(and(eq(expenses.householdId, context.householdId), or(eq(expenses.referenceMonth, month), and(isNull(expenses.referenceMonth), gte(expenses.occurredAt, start), lt(expenses.occurredAt, end))))).orderBy(asc(expenses.occurredAt), asc(expenses.id)),
       db.select({ id: incomes.id, amountCents: incomes.amountCents, description: incomes.description, categoryId: incomes.categoryId, category: categories.name, person: incomes.person, occurredAt: incomes.occurredAt })
@@ -84,7 +85,8 @@ export async function POST(request: Request) {
     if (typeof body.person !== "string" || !allowedPeople.some(person => person.name === body.person)) return invalid("Selecione um integrante válido.");
     if (!isValidDateInput(addMonths(body.occurredAt as string, installmentCount - 1))) return invalid("A última parcela precisa ficar dentro do limite de dezembro de 2200.");
     const baseAmount = Math.floor(amountCents / installmentCount), remainder = amountCents % installmentCount;
-    const rows = Array.from({ length: installmentCount }, (_, index) => ({ householdId: context.householdId, amountCents: baseAmount + (index < remainder ? 1 : 0), description: installmentCount > 1 ? `${description} (${index + 1}/${installmentCount})` : description, categoryId, paymentMethod: body.paymentMethod as string, person: body.person as string, occurredAt: addMonths(body.occurredAt as string, index) }));
+    const installmentGroupId = installmentCount > 1 ? crypto.randomUUID() : null;
+    const rows = Array.from({ length: installmentCount }, (_, index) => ({ householdId: context.householdId, installmentGroupId, amountCents: baseAmount + (index < remainder ? 1 : 0), description: installmentCount > 1 ? `${description} (${index + 1}/${installmentCount})` : description, categoryId, paymentMethod: body.paymentMethod as string, person: body.person as string, occurredAt: addMonths(body.occurredAt as string, index) }));
     const created = await db.insert(expenses).values(rows).returning();
     return Response.json({ expenses: created.map(item => ({ ...item, category: ownedCategory.name })), installments: installmentCount }, { status: 201 });
   } catch (error) { return accessResponse(error); }
@@ -173,15 +175,15 @@ export async function DELETE(request: Request) {
     const context = await requireHousehold(request), url = new URL(request.url), id = parsePositiveSafeInteger(url.searchParams.get("id")), type = url.searchParams.get("type"), db = getDb();
     if (!id || !["expense", "income", "category", "payment"].includes(type ?? "")) return Response.json({ error: "Solicitação inválida." }, { status: 400 });
     if (type === "expense") {
-      const [current] = await db.select({ amountCents: expenses.amountCents, importBatchId: expenses.importBatchId }).from(expenses).where(and(eq(expenses.id, id), eq(expenses.householdId, context.householdId))).limit(1);
+      const [current] = await db.select({ amountCents: expenses.amountCents, importBatchId: expenses.importBatchId, installmentGroupId: expenses.installmentGroupId }).from(expenses).where(and(eq(expenses.id, id), eq(expenses.householdId, context.householdId))).limit(1);
       if (!current) return Response.json({ error: "Gasto não encontrado." }, { status: 404 });
-      const removeExpense = db.delete(expenses).where(and(eq(expenses.id, id), eq(expenses.householdId, context.householdId)));
+      const removeExpense = db.delete(expenses).where(expenseDeletionFilter(id, context.householdId, current.importBatchId ? null : current.installmentGroupId)).returning({ id: expenses.id });
+      let deleted: { id: number }[];
       if (current.importBatchId) {
         const updateBatch = db.update(importBatches).set({ itemCount: sql`max(${importBatches.itemCount} - 1, 0)`, totalCents: sql`${importBatches.totalCents} - ${current.amountCents}` }).where(and(eq(importBatches.id, current.importBatchId), eq(importBatches.householdId, context.householdId)));
-        await db.batch([removeExpense, updateBatch]);
-      } else await db.batch([removeExpense]);
-      const deleted = [{ id }];
-      return deleted.length ? Response.json({ ok: true }) : Response.json({ error: "Gasto não encontrado." }, { status: 404 });
+        [deleted] = await db.batch([removeExpense, updateBatch]);
+      } else [deleted] = await db.batch([removeExpense]);
+      return deleted.length ? Response.json({ ok: true, deletedIds: deleted.map(item => item.id) }) : Response.json({ error: "Gasto não encontrado." }, { status: 404 });
     }
     if (type === "income") {
       const deleted = await db.delete(incomes).where(and(eq(incomes.id, id), eq(incomes.householdId, context.householdId))).returning({ id: incomes.id });

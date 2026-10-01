@@ -147,11 +147,20 @@ export default function Home() {
   }
 
   async function removeExpense(id: number) {
-    if (!confirm("Deseja realmente apagar este gasto?")) return;
-    const removed = data.expenses.find(item => item.id === id); setData(current => ({ ...current, expenses: current.expenses.filter(item => item.id !== id) }));
-    const response = await fetch(`/api/finance?type=expense&id=${id}`, { method: "DELETE", headers: selectedHousehold ? { "x-household-id": selectedHousehold } : {} });
-    if (!response.ok) { if (removed) setData(current => ({ ...current, expenses: [...current.expenses, removed] })); return setNotice("Não foi possível apagar o gasto."); }
-    setNotice("Gasto apagado.");
+    const expense = data.expenses.find(item => item.id === id);
+    if (!expense || id < 1) return;
+    const message = expense.installmentGroupId
+      ? "Apagar esta compra e TODAS as suas parcelas, inclusive as dos outros meses?"
+      : "Deseja realmente apagar este gasto?";
+    if (!confirm(message)) return;
+    try {
+      const response = await fetch(`/api/finance?type=expense&id=${id}`, { method: "DELETE", headers: selectedHousehold ? { "x-household-id": selectedHousehold } : {} });
+      const result = await response.json() as { error?: string; deletedIds?: number[] };
+      if (!response.ok) return setNotice(result.error ?? "Não foi possível apagar o gasto.");
+      const deletedIds = new Set(result.deletedIds ?? [id]);
+      setData(current => ({ ...current, expenses: current.expenses.filter(item => !deletedIds.has(item.id)) }));
+      setNotice(deletedIds.size > 1 ? `Compra apagada com todas as ${deletedIds.size} parcelas restantes.` : "Gasto apagado.");
+    } catch { setNotice("Não foi possível apagar o gasto. Tente novamente."); }
   }
 
   async function editCategory(event: React.FormEvent) {
