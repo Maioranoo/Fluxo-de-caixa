@@ -9,11 +9,13 @@ import { expenseDeletionFilter } from "../../lib/server/expense-deletion.ts";
 
 export async function GET(request: Request) {
   try {
+    const started = performance.now();
     const context = await requireHousehold(request);
+    const authorized = performance.now();
     const month = new URL(request.url).searchParams.get("month") ?? new Date().toISOString().slice(0, 7);
     if (!isValidMonthInput(month)) return Response.json({ error: "Selecione um mês válido entre 2000 e 2200." }, { status: 400 });
     const start = `${month}-01`, end = nextMonth(month), db = getDb();
-    const [categoryRows, expenseRows, incomeRows, memberRows, paymentRows, householdRows, currentHouseholdRows] = await Promise.all([
+    const [categoryRows, expenseRows, incomeRows, memberRows, paymentRows, householdRows, currentHouseholdRows] = await db.batch([
       db.select({ id: categories.id, name: categories.name, kind: categories.kind }).from(categories).where(eq(categories.householdId, context.householdId)).orderBy(asc(categories.name)),
       db.select({ id: expenses.id, amountCents: expenses.amountCents, description: expenses.description, categoryId: expenses.categoryId, category: categories.name, paymentMethod: expenses.paymentMethod, person: expenses.person, occurredAt: expenses.occurredAt, referenceMonth: expenses.referenceMonth, importBatchId: expenses.importBatchId, installmentGroupId: expenses.installmentGroupId })
         .from(expenses).leftJoin(categories, and(eq(expenses.categoryId, categories.id), eq(categories.householdId, context.householdId)))
@@ -22,12 +24,12 @@ export async function GET(request: Request) {
         .from(incomes).leftJoin(categories, and(eq(incomes.categoryId, categories.id), eq(categories.householdId, context.householdId))).where(and(eq(incomes.householdId, context.householdId), gte(incomes.occurredAt, start), lt(incomes.occurredAt, end))).orderBy(asc(incomes.occurredAt), asc(incomes.id)),
       db.select({ id: householdMembers.id, name: householdMembers.displayName, email: householdMembers.email, role: householdMembers.role }).from(householdMembers).where(eq(householdMembers.householdId, context.householdId)).orderBy(asc(householdMembers.displayName)),
       db.select({ id: paymentMethods.id, key: paymentMethods.key, name: paymentMethods.name, isCard: paymentMethods.isCard }).from(paymentMethods).where(eq(paymentMethods.householdId, context.householdId)).orderBy(asc(paymentMethods.name)),
-      context.isAdmin ? db.select({ id: households.id, name: households.name, allowIncome: households.allowIncome }).from(households).orderBy(asc(households.name)) : Promise.resolve([]),
+      db.select({ id: households.id, name: households.name, allowIncome: households.allowIncome }).from(households).where(context.isAdmin ? undefined : sql`0`).orderBy(asc(households.name)),
       db.select({ allowIncome: households.allowIncome }).from(households).where(eq(households.id, context.householdId)).limit(1),
     ]);
     const allowIncome = currentHouseholdRows[0]?.allowIncome === true;
     const visibleMembers = memberRows.map(member => context.isAdmin ? member : { id: member.id, name: member.name, role: member.role });
-    return Response.json({ categories: allowIncome ? categoryRows : categoryRows.filter(category => category.kind === "expense"), expenses: expenseRows, incomes: allowIncome ? incomeRows : [], members: visibleMembers, payments: paymentRows, households: householdRows, household: { id: context.householdId, name: context.householdName, allowIncome }, currentMember: memberRows.some(member => member.name === context.displayName) ? context.displayName : memberRows[0]?.name ?? "", isAdmin: context.isAdmin });
+    return Response.json({ categories: allowIncome ? categoryRows : categoryRows.filter(category => category.kind === "expense"), expenses: expenseRows, incomes: allowIncome ? incomeRows : [], members: visibleMembers, payments: paymentRows, households: householdRows, household: { id: context.householdId, name: context.householdName, allowIncome }, currentMember: memberRows.some(member => member.name === context.displayName) ? context.displayName : memberRows[0]?.name ?? "", isAdmin: context.isAdmin }, { headers: { "Cache-Control": "private, no-store", "Server-Timing": `auth;dur=${(authorized - started).toFixed(1)}, data;dur=${(performance.now() - authorized).toFixed(1)}` } });
   } catch (error) { return accessResponse(error); }
 }
 
@@ -72,10 +74,12 @@ export async function POST(request: Request) {
     }
     if (body.type !== "expense") return invalid("Tipo de lançamento inválido.");
     const amountCents = parseMoneyInput(body.amount), categoryId = parsePositiveSafeInteger(body.categoryId), description = normalizeDescription(body.description);
-    const [ownedPayment] = typeof body.paymentMethod === "string" && body.paymentMethod ? await db.select().from(paymentMethods).where(and(eq(paymentMethods.key, body.paymentMethod), eq(paymentMethods.householdId, context.householdId))).limit(1) : [];
+    const [[ownedPayment], [ownedCategory], allowedPeople] = await db.batch([
+      db.select().from(paymentMethods).where(and(eq(paymentMethods.key, typeof body.paymentMethod === "string" ? body.paymentMethod : ""), eq(paymentMethods.householdId, context.householdId))).limit(1),
+      db.select({ id: categories.id, name: categories.name }).from(categories).where(and(eq(categories.id, categoryId ?? -1), eq(categories.householdId, context.householdId), eq(categories.kind, "expense"))).limit(1),
+      db.select({ name: householdMembers.displayName }).from(householdMembers).where(eq(householdMembers.householdId, context.householdId)),
+    ]);
     const installmentCount = amountCents ? (ownedPayment?.isCard ? parseInstallments(body.installments ?? "1", amountCents) : 1) : null;
-    const [ownedCategory] = categoryId ? await db.select({ id: categories.id, name: categories.name }).from(categories).where(and(eq(categories.id, categoryId), eq(categories.householdId, context.householdId), eq(categories.kind, "expense"))).limit(1) : [];
-    const allowedPeople = await db.select({ name: householdMembers.displayName }).from(householdMembers).where(eq(householdMembers.householdId, context.householdId));
     if (!amountCents) return invalid("Informe um valor entre R$ 0,01 e R$ 999.999.999,99, com no máximo dois centavos.");
     if (!description) return invalid("A descrição deve conter letras e ter no máximo 160 caracteres.");
     if (!ownedCategory) return invalid("Selecione uma categoria de gasto válida.");
@@ -98,14 +102,16 @@ export async function PATCH(request: Request) {
     const context = await requireHousehold(request), body = await readJsonObject(request), db = getDb();
     if (body.type === "expense") {
       const id = parsePositiveSafeInteger(body.id), amountCents = parseMoneyInput(body.amount), categoryId = parsePositiveSafeInteger(body.categoryId), description = normalizeDescription(body.description);
-      const [currentExpense] = id ? await db.select({ amountCents: expenses.amountCents, importBatchId: expenses.importBatchId, referenceMonth: expenses.referenceMonth }).from(expenses).where(and(eq(expenses.id, id), eq(expenses.householdId, context.householdId))).limit(1) : [];
+      const [[currentExpense], [ownedCategory], [ownedPayment], allowedPeople] = await db.batch([
+        db.select({ amountCents: expenses.amountCents, importBatchId: expenses.importBatchId, referenceMonth: expenses.referenceMonth }).from(expenses).where(and(eq(expenses.id, id ?? -1), eq(expenses.householdId, context.householdId))).limit(1),
+        db.select({ id: categories.id, name: categories.name }).from(categories).where(and(eq(categories.id, categoryId ?? -1), eq(categories.householdId, context.householdId), eq(categories.kind, "expense"))).limit(1),
+        db.select({ key: paymentMethods.key }).from(paymentMethods).where(and(eq(paymentMethods.key, typeof body.paymentMethod === "string" ? body.paymentMethod : ""), eq(paymentMethods.householdId, context.householdId))).limit(1),
+        db.select({ name: householdMembers.displayName }).from(householdMembers).where(eq(householdMembers.householdId, context.householdId)),
+      ]);
       const imported = Boolean(currentExpense?.importBatchId);
       const importedDescription = imported ? normalizeImportedDescription(body.description) : description;
       if (imported && body.description != null && body.description !== "" && !importedDescription) return invalid("Descrição inválida.");
       if (imported && body.referenceMonth != null && !isValidMonthInput(body.referenceMonth)) return invalid("Mês de referência inválido.");
-      const [ownedCategory] = categoryId ? await db.select({ id: categories.id, name: categories.name }).from(categories).where(and(eq(categories.id, categoryId), eq(categories.householdId, context.householdId), eq(categories.kind, "expense"))).limit(1) : [];
-      const [ownedPayment] = typeof body.paymentMethod === "string" && body.paymentMethod ? await db.select({ key: paymentMethods.key }).from(paymentMethods).where(and(eq(paymentMethods.key, body.paymentMethod), eq(paymentMethods.householdId, context.householdId))).limit(1) : [];
-      const allowedPeople = await db.select({ name: householdMembers.displayName }).from(householdMembers).where(eq(householdMembers.householdId, context.householdId));
       if (!id || !currentExpense) return invalid("Gasto inválido.");
       if (imported && body.categoryId != null && body.categoryId !== "" && !ownedCategory) return invalid("Categoria inválida.");
       if (imported && body.paymentMethod != null && body.paymentMethod !== "" && !ownedPayment) return invalid("Pagamento inválido.");

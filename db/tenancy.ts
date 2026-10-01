@@ -37,6 +37,7 @@ export async function requireHousehold(request: Request): Promise<HouseholdConte
   const db = getDb();
   let [member] = await db.select({
     memberId: householdMembers.id,
+    userId: householdMembers.userId,
     householdId: householdMembers.householdId,
     householdName: households.name,
     displayName: householdMembers.displayName,
@@ -47,6 +48,7 @@ export async function requireHousehold(request: Request): Promise<HouseholdConte
     if (local) await bootstrapLocalHousehold(); else await bootstrapInitialHousehold(email);
     [member] = await db.select({
       memberId: householdMembers.id,
+      userId: householdMembers.userId,
       householdId: householdMembers.householdId,
       householdName: households.name,
       displayName: householdMembers.displayName,
@@ -57,7 +59,7 @@ export async function requireHousehold(request: Request): Promise<HouseholdConte
 
   await enforceRateLimit(getD1(), `member:${member.memberId}`, requestPolicies(request));
 
-  if (userId) await db.update(householdMembers).set({ userId }).where(eq(householdMembers.id, member.memberId));
+  if (userId && member.userId !== userId) await db.update(householdMembers).set({ userId }).where(eq(householdMembers.id, member.memberId));
   const isAdmin = local || email === config.ADMIN_EMAIL?.trim().toLowerCase();
   const requestedId = parsePositiveSafeInteger(request.headers.get("x-household-id"));
   if (requestedId && requestedId !== member.householdId) {
