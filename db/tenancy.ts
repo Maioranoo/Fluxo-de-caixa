@@ -5,6 +5,9 @@ import { getDb } from ".";
 import { categories, expenses, householdMembers, households, paymentMethods } from "./schema";
 import { normalizeEmail, parsePositiveSafeInteger } from "../app/lib/validation";
 import { AccessError } from "../app/lib/server/http-security.ts";
+import { getObservabilityConfig } from "../app/lib/server/observability/config.ts";
+import { createLogger } from "../app/lib/server/observability/logger.ts";
+import { createRequestContext } from "../app/lib/server/observability/request-context.ts";
 export { AccessError } from "../app/lib/server/http-security.ts";
 
 type RuntimeConfig = {
@@ -12,6 +15,9 @@ type RuntimeConfig = {
   INITIAL_HOUSEHOLD_MEMBERS?: string;
   ADMIN_EMAIL?: string;
   LOCAL_ADMIN_ENABLED?: string;
+  NODE_ENV?: string;
+  LOG_LEVEL?: string;
+  SLOW_AUTH_MS?: string;
 };
 
 export type HouseholdContext = {
@@ -24,6 +30,25 @@ export type HouseholdContext = {
 };
 
 export async function requireHousehold(request: Request): Promise<HouseholdContext> {
+  const runtime = env as unknown as RuntimeConfig;
+  const context = createRequestContext(request, request.headers.get("x-request-id") || undefined);
+  const config = getObservabilityConfig(runtime);
+  const logger = createLogger(context, { level: config.level });
+  const started = performance.now();
+  try {
+    const household = await resolveHousehold(request);
+    logger.debug("auth_success", { operation: "auth.household_lookup", durationMs: performance.now() - started });
+    return household;
+  } catch (error) {
+    logger.warn("auth_failed", { operation: "auth.household_lookup", status: error instanceof AccessError ? error.status : 500, durationMs: performance.now() - started });
+    throw error;
+  } finally {
+    const durationMs = performance.now() - started;
+    if (durationMs > config.slowAuthMs) logger.warn("slow_authentication", { operation: "auth.household_lookup", durationMs, thresholdMs: config.slowAuthMs });
+  }
+}
+
+async function resolveHousehold(request: Request): Promise<HouseholdContext> {
   const config = env as unknown as RuntimeConfig;
   const hostname = new URL(request.url).hostname;
   const local = config.LOCAL_ADMIN_ENABLED === "true" && (hostname === "localhost" || hostname === "127.0.0.1");

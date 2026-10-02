@@ -49,6 +49,18 @@ test("storage outage fails closed", async () => {
   await assert.rejects(enforceRateLimit({ prepare() { throw new Error("private database detail"); } }, "ip:unknown", [{ scope: "all", limit: 5 }]), error => error.status === 503 && !error.message.includes("private"));
 });
 
+test("rate-limit failures are observable without changing fail-closed behavior", async () => {
+  const events = [];
+  const logger = { debug() {}, info() {}, warn: (event, fields) => events.push({ level: "warn", event, ...fields }), error: (event, fields) => events.push({ level: "error", event, ...fields }), fatal() {}, child() { return this; } };
+  await assert.rejects(rateLimit.enforceRateLimits({ prepare() { throw new Error("private database detail"); } }, [{ identity: "ip:secret", policies: [{ scope: "all", limit: 5 }] }], 61000, { logger, databaseBaselineLogging: true, slowDatabaseQueryMs: null }), error => error.status === 503);
+  assert.deepEqual(events.map(item => item.event), ["operation_failed", "rate_limit_storage_failed"]);
+  assert.equal(events.filter(item => item.errorStack).length, 1);
+  assert.equal(events.find(item => item.event === "rate_limit_storage_failed").errorStack, undefined);
+  assert.equal(events.find(item => item.event === "rate_limit_storage_failed").errorMessage, undefined);
+  await assert.rejects(rateLimit.cleanupRateLimits({ prepare() { throw new Error("cleanup private"); } }, 61000, logger));
+  assert.equal(events.at(-1).event, "rate_limit_cleanup_failed");
+});
+
 test("todas as políticas da identidade usam uma única operação no banco", async () => {
   const { sqlite, db, getPrepareCalls } = store();
   try {

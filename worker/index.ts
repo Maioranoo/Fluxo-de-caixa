@@ -55,13 +55,13 @@ const worker = {
     logger.debug("request_started");
 
     try {
-      await enforceRateLimits(env.DB, requestRateLimitChecks(contextualRequest));
+      await enforceRateLimits(env.DB, requestRateLimitChecks(contextualRequest), Date.now(), { logger, databaseBaselineLogging: config.databaseBaselineLogging, slowDatabaseQueryMs: config.slowDatabaseQueryMs });
     } catch (error) {
       if (error instanceof AccessError) return report(Response.json({ error: error.message }, { status: error.status, headers: error.headers }));
       return report(Response.json({ error: "Proteção de acesso indisponível." }, { status: 503 }));
     }
     // Indexed, bounded housekeeping; no unbounded in-memory identity map.
-    if (Math.random() < 0.01) ctx.waitUntil(cleanupRateLimits(env.DB).catch(() => {}));
+    if (Math.random() < 0.01) ctx.waitUntil(cleanupRateLimits(env.DB, Date.now(), logger).catch(() => {}));
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
