@@ -4,6 +4,7 @@ import { getObservabilityConfig } from "../app/lib/server/observability/config.t
 import { createLogger } from "../app/lib/server/observability/logger.ts";
 
 test("observability configuration is defensive and keeps D1 baseline configurable", () => {
+  assert.equal(getObservabilityConfig({}).level, "info");
   assert.deepEqual(getObservabilityConfig({ NODE_ENV: "production" }), { level: "info", slowRequestMs: 1000, slowAuthMs: 500, slowDatabaseQueryMs: null, databaseBaselineLogging: true });
   assert.equal(getObservabilityConfig({ NODE_ENV: "development" }).level, "debug");
   assert.deepEqual(getObservabilityConfig({ NODE_ENV: "production", SLOW_REQUEST_MS: "1200", SLOW_AUTH_MS: "250", SLOW_DATABASE_QUERY_MS: "740", DATABASE_BASELINE_LOGGING: "false", LOG_LEVEL: "warn" }), { level: "warn", slowRequestMs: 1200, slowAuthMs: 250, slowDatabaseQueryMs: 740, databaseBaselineLogging: false });
@@ -12,7 +13,7 @@ test("observability configuration is defensive and keeps D1 baseline configurabl
 
 test("logger emits one-line JSON and filters debug in production", () => {
   const lines = [];
-  const logger = createLogger({ requestId: "req_1", route: "/api/finance", method: "GET", environment: "production" }, { level: "info", sink: { log: line => lines.push(line), warn: line => lines.push(line), error: line => lines.push(line) }, now: () => new Date("2026-10-01T23:20:00.000Z") });
+  const logger = createLogger({ requestId: "req_1", route: "/api/finance", method: "GET", environment: "production" }, { sink: { log: line => lines.push(line), warn: line => lines.push(line), error: line => lines.push(line) }, now: () => new Date("2026-10-01T23:20:00.000Z") });
   logger.debug("auth_success");
   logger.info("request_completed", { status: 200, durationMs: 81 });
   assert.equal(lines.length, 1);

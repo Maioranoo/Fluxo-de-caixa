@@ -9,7 +9,7 @@ export type ObservabilityConfig = {
 };
 
 export function getObservabilityConfig(environment: Record<string, string | undefined> = {}): ObservabilityConfig {
-  const production = environment.NODE_ENV === "production";
+  const production = environment.NODE_ENV !== "development";
   return {
     level: parseLevel(environment.LOG_LEVEL, production ? "info" : "debug"),
     slowRequestMs: parsePositive(environment.SLOW_REQUEST_MS, 1000),
