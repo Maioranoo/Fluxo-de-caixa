@@ -1,7 +1,8 @@
 import type { FinanceData } from "./finance-ui.ts";
 
 type MonthData = Pick<FinanceData, "expenses" | "incomes">;
-type Result = { response: { status: number; ok: boolean }; payload: FinanceData & { error?: string; prefetchedMonths?: Record<string, MonthData> } };
+export type FinancePayload = FinanceData & { error?: string; prefetchedMonths?: Record<string, MonthData> };
+type Result = { response: { status: number; ok: boolean }; payload: FinancePayload };
 
 const CACHE_TTL_MS = 5 * 60_000;
 
@@ -11,6 +12,23 @@ export function createFinanceClient(fetcher: typeof fetch = fetch, now = Date.no
   const pending = new Map<string, Promise<Result>>();
   let generation = 0;
   const invalidate = () => { generation++; cache.clear(); pending.clear(); };
+  function store(month: string, household: string, result: Result) {
+    const key = `${household}:${month}`;
+    cache.delete(key);
+    cache.set(key, { result, expires: now() + CACHE_TTL_MS });
+    for (const [prefetchedMonth, monthData] of Object.entries(result.payload.prefetchedMonths ?? {})) {
+      const prefetchedKey = `${household}:${prefetchedMonth}`;
+      cache.delete(prefetchedKey);
+      cache.set(prefetchedKey, {
+        result: { response: result.response, payload: { ...result.payload, ...monthData, prefetchedMonths: undefined } },
+        expires: now() + CACHE_TTL_MS,
+      });
+    }
+    while (cache.size > 6) cache.delete(cache.keys().next().value!);
+  }
+  function prime(month: string, household: string, payload: FinancePayload) {
+    store(month, household, { response: { status: 200, ok: true }, payload });
+  }
   function read(month: string, household: string): Promise<Result> {
     const key = `${household}:${month}`, hit = cache.get(key);
     if (hit && hit.expires > now()) return Promise.resolve(hit.result);
@@ -23,19 +41,7 @@ export function createFinanceClient(fetcher: typeof fetch = fetch, now = Date.no
       .then(result => {
         if (generation !== started) throw new DOMException("Leitura substituída", "AbortError");
         if (result.response.status === 401 || result.response.status === 403) invalidate();
-        else if (result.response.ok && !result.payload.error) {
-          cache.delete(key);
-          cache.set(key, { result, expires: now() + CACHE_TTL_MS });
-          for (const [prefetchedMonth, monthData] of Object.entries(result.payload.prefetchedMonths ?? {})) {
-            const prefetchedKey = `${household}:${prefetchedMonth}`;
-            cache.delete(prefetchedKey);
-            cache.set(prefetchedKey, {
-              result: { response: result.response, payload: { ...result.payload, ...monthData, prefetchedMonths: undefined } },
-              expires: now() + CACHE_TTL_MS,
-            });
-          }
-          if (cache.size > 6) cache.delete(cache.keys().next().value!);
-        }
+        else if (result.response.ok && !result.payload.error) store(month, household, result);
         return result;
       }).finally(() => { if (pending.get(key) === promise) pending.delete(key); });
     pending.set(key, promise);
@@ -46,7 +52,7 @@ export function createFinanceClient(fetcher: typeof fetch = fetch, now = Date.no
     try { return await fetcher(url, init); }
     finally { invalidate(); }
   }
-  return { read, write, invalidate };
+  return { read, write, invalidate, prime };
 }
 
 export function adjacentMonths(month: string): string[] {

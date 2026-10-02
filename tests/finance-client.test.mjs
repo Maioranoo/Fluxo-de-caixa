@@ -50,6 +50,27 @@ test("one request warms the previous and next month caches", async () => {
   assert.equal(next.payload.expenses[0].id, 11);
 });
 
+test("server bootstrap primes the current and adjacent month caches", async () => {
+  let calls = 0;
+  const client = createFinanceClient(async () => { calls++; return Response.json({}); });
+  client.prime("2026-10", "", {
+    categories: [], expenses: [{ id: 10 }], incomes: [], members: [], payments: [], households: [], household: { id: 1 }, currentMember: "Ana", isAdmin: false,
+    prefetchedMonths: {
+      "2026-09": { expenses: [{ id: 9 }], incomes: [] },
+      "2026-11": { expenses: [{ id: 11 }], incomes: [] },
+    },
+  });
+
+  const current = await client.read("2026-10", "");
+  const previous = await client.read("2026-09", "");
+  const next = await client.read("2026-11", "");
+
+  assert.equal(calls, 0);
+  assert.equal(current.payload.expenses[0].id, 10);
+  assert.equal(previous.payload.expenses[0].id, 9);
+  assert.equal(next.payload.expenses[0].id, 11);
+});
+
 test("a pending read cannot repopulate cache after a write", async () => {
   let finish, calls = 0;
   const client = createFinanceClient(() => { calls++; return new Promise(resolve => { finish = resolve; }); });

@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 
 test("painel financeiro possui os fluxos essenciais", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/components/finance-dashboard.tsx", import.meta.url), "utf8");
   const transactions = await readFile(new URL("../app/components/transactions.tsx", import.meta.url), "utf8");
   const source = `${page}\n${transactions}`;
   assert.match(page, /Adicionar gasto/);
@@ -87,7 +87,7 @@ test("painel administrativo exige autorização no servidor", async () => {
 });
 
 test("entradas são opcionais e permanecem isoladas por família", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/components/finance-dashboard.tsx", import.meta.url), "utf8");
   const summary = await readFile(new URL("../app/components/finance-summary.tsx", import.meta.url), "utf8");
   const api = await readFile(new URL("../app/api/finance/route.ts", import.meta.url), "utf8");
   const admin = await readFile(new URL("../app/api/admin/households/route.ts", import.meta.url), "utf8");
@@ -107,7 +107,7 @@ test("entradas são opcionais e permanecem isoladas por família", async () => {
 });
 
 test("edição completa permanece restrita à carteira atual", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/components/finance-dashboard.tsx", import.meta.url), "utf8");
   const api = await readFile(new URL("../app/api/finance/route.ts", import.meta.url), "utf8");
   assert.match(page, /Editar gasto/);
   assert.match(page, /Editar entrada/);
@@ -121,7 +121,7 @@ test("edição completa permanece restrita à carteira atual", async () => {
 });
 
 test("integrantes só podem ser gerenciados pelo administrador na carteira selecionada", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/components/finance-dashboard.tsx", import.meta.url), "utf8");
   const admin = await readFile(new URL("../app/api/admin/households/route.ts", import.meta.url), "utf8");
   assert.match(page, /Integrantes de/);
   assert.match(page, /type: "member"/);
@@ -133,10 +133,10 @@ test("integrantes só podem ser gerenciados pelo administrador na carteira selec
 });
 
 test("privacidade, data local e salvamento protegido estão ativos", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
-  const api = await readFile(new URL("../app/api/finance/route.ts", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/components/finance-dashboard.tsx", import.meta.url), "utf8");
+  const financeData = await readFile(new URL("../app/lib/server/finance-data.ts", import.meta.url), "utf8");
   const security = await readFile(new URL("../app/lib/server/http-security.ts", import.meta.url), "utf8");
-  assert.match(api, /context\.isAdmin \? member/);
+  assert.match(financeData, /context\.isAdmin \? member/);
   assert.match(page, /date\.getFullYear\(\)/);
   assert.doesNotMatch(page, /toISOString\(\)\.slice\(0, 10\)/);
   assert.match(page, /if \(savingExpense\) return/);
@@ -164,7 +164,7 @@ test("impressão do relatório restaura a tabela de desktop depois das regras mo
 });
 
 test("redesign mantém navegação, foco, redução de movimento e componentes sem emoji", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/components/finance-dashboard.tsx", import.meta.url), "utf8");
   const shell = await readFile(new URL("../app/components/app-shell.tsx", import.meta.url), "utf8");
   const icons = await readFile(new URL("../app/components/icons.tsx", import.meta.url), "utf8");
   const ui = await readFile(new URL("../app/components/ui.tsx", import.meta.url), "utf8");
@@ -182,7 +182,7 @@ test("redesign mantém navegação, foco, redução de movimento e componentes s
 });
 
 test("importador possui conferência editável equivalente no desktop e mobile", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/components/finance-dashboard.tsx", import.meta.url), "utf8");
   const workspace = await readFile(new URL("../app/components/imports/import-workspace.tsx", import.meta.url), "utf8");
   const fileStep = await readFile(new URL("../app/components/imports/file-step.tsx", import.meta.url), "utf8");
   const mapper = await readFile(new URL("../app/components/imports/column-mapper.tsx", import.meta.url), "utf8");

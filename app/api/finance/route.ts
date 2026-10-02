@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { AccessError, requireHousehold } from "../../../db/tenancy";
 import { categories, categoryRules, expenses, householdMembers, households, importBatches, incomes, paymentMethods } from "../../../db/schema";
@@ -6,37 +6,19 @@ import { isCategoryKind, isValidDateInput, isValidMonthInput, normalizeCategoryN
 import { assertSameSite, readJsonObject } from "../security";
 import { normalizeMerchant } from "../../lib/imports/fingerprint.ts";
 import { expenseDeletionFilter } from "../../lib/server/expense-deletion.ts";
-import { bucketFinanceRows, parseFinanceMonths } from "../../lib/finance-months.ts";
+import { InvalidFinanceMonthsError, loadFinanceData } from "../../lib/server/finance-data.ts";
 
 export async function GET(request: Request) {
   try {
     const started = performance.now();
-    const context = await requireHousehold(request);
-    const authorized = performance.now();
     const url = new URL(request.url);
     const month = url.searchParams.get("month") ?? new Date().toISOString().slice(0, 7);
-    const requestedMonths = parseFinanceMonths(month, url.searchParams.get("months"));
-    if (!requestedMonths) return Response.json({ error: "Selecione meses válidos e consecutivos entre 2000 e 2200." }, { status: 400 });
-    const start = `${requestedMonths[0]}-01`, end = nextMonth(requestedMonths.at(-1)!), db = getDb();
-    const [categoryRows, expenseRows, incomeRows, memberRows, paymentRows, householdRows, currentHouseholdRows] = await db.batch([
-      db.select({ id: categories.id, name: categories.name, kind: categories.kind }).from(categories).where(eq(categories.householdId, context.householdId)).orderBy(asc(categories.name)),
-      db.select({ id: expenses.id, amountCents: expenses.amountCents, description: expenses.description, categoryId: expenses.categoryId, category: categories.name, paymentMethod: expenses.paymentMethod, person: expenses.person, occurredAt: expenses.occurredAt, referenceMonth: expenses.referenceMonth, importBatchId: expenses.importBatchId, installmentGroupId: expenses.installmentGroupId })
-        .from(expenses).leftJoin(categories, and(eq(expenses.categoryId, categories.id), eq(categories.householdId, context.householdId)))
-        .where(and(eq(expenses.householdId, context.householdId), or(inArray(expenses.referenceMonth, requestedMonths), and(isNull(expenses.referenceMonth), gte(expenses.occurredAt, start), lt(expenses.occurredAt, end))))).orderBy(asc(expenses.occurredAt), asc(expenses.id)),
-      db.select({ id: incomes.id, amountCents: incomes.amountCents, description: incomes.description, categoryId: incomes.categoryId, category: categories.name, person: incomes.person, occurredAt: incomes.occurredAt })
-        .from(incomes).leftJoin(categories, and(eq(incomes.categoryId, categories.id), eq(categories.householdId, context.householdId))).where(and(eq(incomes.householdId, context.householdId), gte(incomes.occurredAt, start), lt(incomes.occurredAt, end))).orderBy(asc(incomes.occurredAt), asc(incomes.id)),
-      db.select({ id: householdMembers.id, name: householdMembers.displayName, email: householdMembers.email, role: householdMembers.role }).from(householdMembers).where(eq(householdMembers.householdId, context.householdId)).orderBy(asc(householdMembers.displayName)),
-      db.select({ id: paymentMethods.id, key: paymentMethods.key, name: paymentMethods.name, isCard: paymentMethods.isCard }).from(paymentMethods).where(eq(paymentMethods.householdId, context.householdId)).orderBy(asc(paymentMethods.name)),
-      db.select({ id: households.id, name: households.name, allowIncome: households.allowIncome }).from(households).where(context.isAdmin ? undefined : sql`0`).orderBy(asc(households.name)),
-      db.select({ allowIncome: households.allowIncome }).from(households).where(eq(households.id, context.householdId)).limit(1),
-    ]);
-    const allowIncome = currentHouseholdRows[0]?.allowIncome === true;
-    const visibleMembers = memberRows.map(member => context.isAdmin ? member : { id: member.id, name: member.name, role: member.role });
-    const buckets = bucketFinanceRows(expenseRows, allowIncome ? incomeRows : [], requestedMonths);
-    const current = buckets[month];
-    const prefetchedMonths = Object.fromEntries(requestedMonths.filter(item => item !== month).map(item => [item, buckets[item]]));
-    return Response.json({ categories: allowIncome ? categoryRows : categoryRows.filter(category => category.kind === "expense"), expenses: current.expenses, incomes: current.incomes, prefetchedMonths, members: visibleMembers, payments: paymentRows, households: householdRows, household: { id: context.householdId, name: context.householdName, allowIncome }, currentMember: memberRows.some(member => member.name === context.displayName) ? context.displayName : memberRows[0]?.name ?? "", isAdmin: context.isAdmin }, { headers: { "Cache-Control": "private, no-store", "Server-Timing": `auth;dur=${(authorized - started).toFixed(1)}, data;dur=${(performance.now() - authorized).toFixed(1)}` } });
-  } catch (error) { return accessResponse(error); }
+    const payload = await loadFinanceData(request, month, url.searchParams.get("months"));
+    return Response.json(payload, { headers: { "Cache-Control": "private, no-store", "Server-Timing": `total;dur=${(performance.now() - started).toFixed(1)}` } });
+  } catch (error) {
+    if (error instanceof InvalidFinanceMonthsError) return Response.json({ error: error.message }, { status: 400 });
+    return accessResponse(error);
+  }
 }
 
 export async function POST(request: Request) {
@@ -225,5 +207,4 @@ export async function DELETE(request: Request) {
 
 function accessResponse(error: unknown) { if (error instanceof AccessError) return Response.json({ error: error.message }, { status: error.status, headers: error.headers }); console.error("Request failed"); return Response.json({ error: "Não foi possível acessar os dados agora." }, { status: 500 }); }
 function invalid(error: string) { return Response.json({ error }, { status: 400 }); }
-function nextMonth(month: string) { const [year, m] = month.split("-").map(Number); const d = new Date(year, m, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`; }
 function addMonths(date: string, offset: number) { const [year, month, day] = date.split("-").map(Number); const first = new Date(Date.UTC(year, month - 1 + offset, 1)); const lastDay = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate(); return `${first.getUTCFullYear()}-${String(first.getUTCMonth() + 1).padStart(2, "0")}-${String(Math.min(day, lastDay)).padStart(2, "0")}`; }
