@@ -45,8 +45,9 @@ OpenTelemetry and Sentry are explicitly deferred. The interfaces introduced here
 - `SLOW_REQUEST_MS` defaults to `1000`.
 - `SLOW_AUTH_MS` is centralized and configurable.
 - `SLOW_DATABASE_QUERY_MS` is centralized, optional, and **disabled by default during the baseline phase**.
+- `DATABASE_BASELINE_LOGGING` defaults to `true` and can be changed at runtime without a code change.
 
-While the database warning threshold is disabled, critical D1 operations emit `database_operation_completed` at info level with `durationMs`. Production observations will be used to choose a threshold later. Enabling `SLOW_DATABASE_QUERY_MS` adds `slow_database_query` warnings without changing the instrumentation sites.
+While baseline logging is enabled, critical D1 operations emit `database_operation_completed` at info level with `durationMs`, even when the warning threshold is disabled. Production observations will be used to choose a threshold later. Enabling `SLOW_DATABASE_QUERY_MS` adds `slow_database_query` warnings without changing the instrumentation sites. After a threshold is selected, setting `DATABASE_BASELINE_LOGGING=false` suppresses normal database completion events while preserving slow-operation and failure events.
 
 Invalid, negative, zero, or unreasonably large environment values fall back to safe defaults or disabled state. Configuration parsing never throws.
 
@@ -77,6 +78,8 @@ All logger entry points are non-throwing. A final outer `try/catch` covers times
 `app/lib/server/observability/request-context.ts` defines a small immutable context containing `requestId`, normalized route, method, optional Cloudflare ray ID, and environment. The Worker always replaces any inbound `x-request-id` with `req_${crypto.randomUUID()}` and forwards the resulting request to Vinext. The response exposes the same ID in `x-request-id`.
 
 Lower layers reconstruct the context from the trusted internal request headers. Member and household IDs are not part of the base context.
+
+Adding correlation must be body-transparent. Request cloning may add the internal header but must not read, parse, buffer, or replace request bodies. Response correlation must create a response wrapper that reuses the original streaming body and preserves status, status text, and every existing header before adding `x-request-id`. The observability layer must never call `text()`, `json()`, `arrayBuffer()`, or clone a stream for inspection.
 
 ### Operation measurement
 
@@ -123,6 +126,12 @@ Important writes emit one final event such as `expense_created`, `expense_update
 Expected 4xx conditions remain normal response outcomes. They do not include stack traces. Authentication failures receive their dedicated event. Unexpected exceptions produce `unexpected_error` with request ID, route, operation, elapsed duration, error class, and a bounded sanitized stack when safe.
 
 Unknown error messages are not trusted. Production serialization removes forbidden patterns, truncates strings, limits nesting, and never walks arbitrary application objects. Development may retain more diagnostic detail after the same redaction pass.
+
+### Error detail ownership
+
+Only the instrumentation boundary closest to the failing operation logs full sanitized error details and stack trace. It marks the exception as observed using a private in-memory marker when the value is extensible, with a `WeakSet<object>` fallback for non-extensible error objects. Marking is itself fail-open.
+
+Higher boundaries still emit structural events such as `request_failed`, but those events contain only request ID, normalized route, status, duration, and optional operation/origin. They never repeat message, stack, cause, or full error fields. Expected errors do not receive the observed marker or a stack event.
 
 Silent catches are addressed without changing fallback behavior:
 
@@ -171,13 +180,16 @@ Tests must prove:
 1. every public logger method remains non-throwing when the clock, sanitizer, serializer, or console throws;
 2. `measureOperation()` returns the original value and rethrows the original application exception even when logging fails;
 3. inbound request IDs are replaced, propagated internally, and returned in the response;
-4. forbidden values and forbidden keys never appear in serialized output;
-5. normal authentication success is absent at production info level;
-6. authentication failure and slow authentication are logged safely;
-7. database thresholds are configurable and disabled by default;
-8. database durations are observable during the baseline phase without SQL or parameters;
-9. request and database warning thresholds produce the expected events;
-10. existing login, allowlist, finance, import, installment, and admin behavior remains unchanged.
+4. POST, PATCH, and DELETE request bodies remain byte-identical and unconsumed through Worker instrumentation;
+5. response status, status text, existing headers, body bytes, and streaming behavior remain unchanged when correlation is added;
+6. forbidden values and forbidden keys never appear in serialized output;
+7. normal authentication success is absent at production info level;
+8. authentication failure and slow authentication are logged safely;
+9. database thresholds are configurable and disabled by default;
+10. `DATABASE_BASELINE_LOGGING` defaults to true and suppresses normal completion logs when set to false;
+11. one exception produces full sanitized details at only one instrumentation boundary;
+12. request and database warning thresholds produce the expected events;
+13. existing login, allowlist, finance, import, installment, and admin behavior remains unchanged.
 
 ## Rollout
 

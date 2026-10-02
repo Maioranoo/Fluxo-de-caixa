@@ -16,6 +16,7 @@
 - Logging, sanitization, serialization, clocks, and console calls must be fail-open and must never change application results or errors.
 - Production emits info and above; normal authentication success is debug-only or omitted.
 - `SLOW_DATABASE_QUERY_MS` is centralized, configurable, and disabled by default while baseline timings are collected.
+- `DATABASE_BASELINE_LOGGING` is centralized, configurable, defaults to `true`, and can disable normal D1 completion logs without a code change.
 - `memberId` and `householdId` are opt-in event fields and are never added automatically to routine logs.
 - Never log e-mail, names, raw ChatGPT IDs, IPs, headers, cookies, tokens, request/response bodies, financial values or descriptions, card data, SQL, SQL parameters, imported file identity, or document contents.
 - Add no observability D1 writes or external network calls.
@@ -28,6 +29,8 @@
 - An operation that throws must preserve the exact original exception when timing or logging also fails.
 - Invalid threshold environment values must produce safe defaults without disabling the application.
 - Unknown error messages containing token-like or financial-looking text must not leak through the production serializer.
+- Request and response bodies, including streaming SSR responses, must remain unconsumed and byte-identical after Worker instrumentation.
+- One exception crossing operation, handler, and Worker boundaries must produce full error details and stack at only one boundary.
 
 ---
 
@@ -46,7 +49,7 @@
 
 - [ ] **Step 1: Write failing configuration tests**
 
-Add tests proving production defaults to `info`, local defaults to `debug`, `SLOW_REQUEST_MS` has the specified default, `SLOW_DATABASE_QUERY_MS` defaults to disabled, and valid environment values override defaults. Assert zero, negative, nonnumeric, and excessive values fall back safely.
+Add tests proving production defaults to `info`, local defaults to `debug`, `SLOW_REQUEST_MS` has the specified default, `SLOW_DATABASE_QUERY_MS` defaults to disabled, and `DATABASE_BASELINE_LOGGING` defaults to true. Assert valid environment values override defaults and invalid threshold or boolean values fall back safely.
 
 - [ ] **Step 2: Run the configuration tests and verify failure**
 
@@ -102,6 +105,8 @@ git commit -m "Add fail-open structured logger"
 
 Assert a generated request ID replaces a malicious inbound ID, route excludes query strings, method is retained, `cf-ray` is optional, the internal request carries the generated ID, and the response exposes it.
 
+Add explicit byte-level tests for POST, PATCH, and DELETE requests. After correlation is attached, assert each original body remains unconsumed, the forwarded body is byte-identical, and method plus all existing headers are unchanged except for the trusted request ID.
+
 - [ ] **Step 2: Run the focused tests and verify failure**
 
 Run: `node --experimental-strip-types --test tests/observability-request.test.mjs`  
@@ -114,6 +119,8 @@ Create immutable context and clone only the request headers needed to add the tr
 - [ ] **Step 4: Write failing Worker structure tests**
 
 Assert the Worker creates context before rate limiting, forwards the contextual request to rate limiting and Vinext, attaches the response ID, excludes static/image logging, emits `request_completed`, emits `slow_request` from configuration, and contains no direct serialization of request or headers.
+
+Add response-transparency tests asserting status, status text, existing headers, and response bytes remain identical. Use a multi-chunk `ReadableStream` with pull tracking and assert correlation does not read, buffer, or consume the stream before the caller consumes it.
 
 - [ ] **Step 5: Implement Worker lifecycle logging**
 
@@ -141,6 +148,7 @@ git commit -m "Add correlated request lifecycle logs"
 - Consumes: `Logger`, `RequestLogContext`, and `ObservabilityConfig`.
 - Produces: `measureOperation<T>(logger: Logger, options: MeasureOptions, operation: () => Promise<T>): Promise<T>`.
 - `MeasureOptions` defines semantic operation, completion/failure event names, kind (`application`, `authentication`, `database`, or `external`), optional safe fields, and optional warning threshold.
+- Produces: `markErrorObserved(error): boolean` and `isErrorObserved(error): boolean` for fail-open error-detail ownership.
 
 - [ ] **Step 1: Write failing result and error identity tests**
 
@@ -150,6 +158,8 @@ Assert the helper returns the exact resolved value. Assert it rethrows the exact
 
 Use a deterministic clock to assert duration. Make the clock and logger throw separately and assert the operation result remains unchanged. Assert a database operation with no configured threshold emits baseline completion but no `slow_database_query`.
 
+Add nested-boundary tests where the same exception crosses two `measureOperation()` calls and a request-level failure reporter. Assert exactly one event contains error name/stack and later events contain correlation/status/duration only. Cover frozen/non-extensible Error instances and primitive thrown values without changing their identity.
+
 - [ ] **Step 3: Run tests and verify failure**
 
 Run: `node --experimental-strip-types --test tests/observability-measure.test.mjs`  
@@ -157,7 +167,7 @@ Expected: FAIL because `measureOperation` does not exist.
 
 - [ ] **Step 4: Implement `measureOperation()`**
 
-Measure with `performance.now()` behind safe helpers. Emit the specified completion event; emit warning events only when a configured threshold exists and is crossed. On application failure, attempt sanitized failure logging and rethrow the original exception.
+Measure with `performance.now()` behind safe helpers. Emit the specified completion event; emit warning events only when a configured threshold exists and is crossed. On application failure, claim error-detail ownership fail-safely, emit full sanitized details only for the owning boundary, and rethrow the original exception. Higher boundaries emit structural failure events without repeating error details.
 
 - [ ] **Step 5: Run tests and commit**
 
@@ -235,6 +245,8 @@ git commit -m "Instrument authorization and rate limiting"
 - [ ] **Step 1: Write failing finance timing tests**
 
 Assert `database.finance_batch` emits duration during the baseline phase, omits SQL and parameters, and does not warn while the database threshold is disabled. Assert setting the threshold produces `slow_database_query` only when exceeded.
+
+Assert `DATABASE_BASELINE_LOGGING=false` suppresses normal `database_operation_completed` info events while preserving configured slow warnings and database failure events.
 
 - [ ] **Step 2: Write failing privacy tests for finance writes**
 
@@ -362,12 +374,17 @@ Use the Sites Worker logs after representative reads and writes. Record applicat
 
 Summarize median, p95, cold, and warm timings per semantic D1 operation. Propose a threshold based on observed production distributions. Do not enable it without user review.
 
+After the threshold is approved and configured, set `DATABASE_BASELINE_LOGGING=false` through runtime configuration so normal D1 operations stop emitting info events without another source change.
+
 ## Completion Criteria
 
 - All tests and lint pass.
 - Logging failure tests cover every fail-open boundary.
 - Production normal authentication success generates no info log.
 - Critical D1 timings are visible with no database warning threshold fixed in code.
+- Baseline D1 info events can be disabled through `DATABASE_BASELINE_LOGGING=false` without changing code.
+- Worker instrumentation preserves POST, PATCH, DELETE, ordinary responses, and streamed SSR bodies byte-for-byte and without premature consumption.
+- One thrown exception produces full sanitized error details at only one boundary.
 - No protected or financial data appears in fixtures or captured logs.
 - Request IDs correlate Worker, authorization, service, and database events.
 - Existing functions, responses, login, and access allowlist remain unchanged.
