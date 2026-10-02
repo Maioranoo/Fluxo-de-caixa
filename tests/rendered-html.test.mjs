@@ -211,3 +211,14 @@ test("importador possui conferência editável equivalente no desktop e mobile",
   assert.match(page, /key={`\$\{selectedHousehold\}-\$\{month\}`}/);
   assert.match(page, /expenseDateKey\(a\)\.localeCompare\(expenseDateKey\(b\)\)/);
 });
+
+test("exclusão de gastos usa modal próprio sem confirmação do navegador", async () => {
+  const source = await readFile(new URL("../app/components/finance-dashboard.tsx", import.meta.url), "utf8");
+  const removalFlow = source.match(/function removeExpense[\s\S]*?async function editCategory/)?.[0] ?? "";
+  assert.notEqual(removalFlow, "");
+  assert.doesNotMatch(removalFlow, /\bconfirm\s*\(/);
+  assert.match(source, /title="Excluir gasto\?"/);
+  assert.match(source, /Todas as parcelas desta compra também serão excluídas/);
+  assert.match(source, /Excluindo…/);
+  assert.match(source, /className="danger-button"/);
+});

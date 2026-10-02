@@ -63,10 +63,18 @@ export function FinanceDashboard({ initialFinance = null }: { initialFinance?: I
   const [memberEdit, setMemberEdit] = useState({ id: 0, name: "", email: "" });
   const [savingExpense, setSavingExpense] = useState(false);
   const [savingIncome, setSavingIncome] = useState(false);
+  const [expenseToDelete, setExpenseToDelete] = useState<Expense | null>(null);
+  const [deletingExpense, setDeletingExpense] = useState(false);
+  const [expenseDeleteError, setExpenseDeleteError] = useState("");
   const [showImport, setShowImport] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const queryKey = `${requestedHousehold}:${month}:${refreshKey}`;
   const closeMonthPicker = useCallback(() => setShowMonthPicker(false), []);
+  const closeExpenseDelete = useCallback(() => {
+    if (deletingExpense) return;
+    setExpenseToDelete(null);
+    setExpenseDeleteError("");
+  }, [deletingExpense]);
   const nextTemporaryId = useRef(-1);
   const payments = useMemo(() => data.payments.map(payment => [payment.key, payment.name]), [data.payments]);
   const isCardPayment = (key: string) => data.payments.some(payment => payment.key === key && payment.isCard);
@@ -158,21 +166,28 @@ export function FinanceDashboard({ initialFinance = null }: { initialFinance?: I
     setCategoryName(""); setNotice(`Categoria de ${categoryKind === "income" ? "entrada" : "gasto"} criada.`);
   }
 
-  async function removeExpense(id: number) {
+  function removeExpense(id: number) {
     const expense = data.expenses.find(item => item.id === id);
     if (!expense || id < 1) return;
-    const message = expense.installmentGroupId
-      ? "Apagar esta compra e TODAS as suas parcelas, inclusive as dos outros meses?"
-      : "Deseja realmente apagar este gasto?";
-    if (!confirm(message)) return;
+    setExpenseDeleteError("");
+    setExpenseToDelete(expense);
+  }
+
+  async function confirmExpenseDeletion() {
+    if (!expenseToDelete || deletingExpense) return;
+    const id = expenseToDelete.id;
+    setDeletingExpense(true);
+    setExpenseDeleteError("");
     try {
       const response = await financeClient.write(`/api/finance?type=expense&id=${id}`, { method: "DELETE", headers: selectedHousehold ? { "x-household-id": selectedHousehold } : {} });
       const result = await response.json() as { error?: string; deletedIds?: number[] };
-      if (!response.ok) return setNotice(result.error ?? "Não foi possível apagar o gasto.");
+      if (!response.ok) return setExpenseDeleteError(result.error ?? "Não foi possível apagar o gasto.");
       const deletedIds = new Set(result.deletedIds ?? [id]);
       setData(current => ({ ...current, expenses: current.expenses.filter(item => !deletedIds.has(item.id)) }));
       setNotice(deletedIds.size > 1 ? `Compra apagada com todas as ${deletedIds.size} parcelas restantes.` : "Gasto apagado.");
-    } catch { setNotice("Não foi possível apagar o gasto. Tente novamente."); }
+      setExpenseToDelete(null);
+    } catch { setExpenseDeleteError("Não foi possível apagar o gasto. Tente novamente."); }
+    finally { setDeletingExpense(false); }
   }
 
   async function editCategory(event: React.FormEvent) {
@@ -387,6 +402,7 @@ export function FinanceDashboard({ initialFinance = null }: { initialFinance?: I
     </main>
     <MobileNavigation items={mobilePrimaryItems} tab={tab} onNavigate={openTab}/>
     {showMonthPicker&&<DialogFrame titleId="month-modal-title" title="Selecionar mês" description="Escolha o período que deseja consultar." onClose={closeMonthPicker} className="month-modal"><div className="month-modal-fields"><label>Mês<select value={monthDraft.split("-")[1]} onChange={event=>setMonthDraft(`${monthDraft.split("-")[0]}-${event.target.value}`)}>{monthNames.map((name,index)=><option key={name} value={String(index+1).padStart(2,"0")}>{name}</option>)}</select></label><label>Ano<select value={monthDraft.split("-")[0]} onChange={event=>setMonthDraft(`${event.target.value}-${monthDraft.split("-")[1]}`)}>{Array.from({length:201},(_,index)=>2200-index).map(year=><option key={year} value={year}>{year}</option>)}</select></label></div><div className="month-modal-actions"><button type="button" className="month-reset" onClick={()=>setMonthDraft(monthKey())}>Hoje</button><button type="button" className="month-confirm" aria-label="Confirmar mês selecionado" onClick={applyMonth}><Icon name="check"/></button></div></DialogFrame>}
+    {expenseToDelete&&<DialogFrame titleId="expense-delete-title" title="Excluir gasto?" description={expenseToDelete.installmentGroupId ? "Todas as parcelas desta compra também serão excluídas, inclusive as de outros meses." : "Esta ação não pode ser desfeita."} onClose={closeExpenseDelete} className="delete-confirm-modal" footer={<><button className="secondary" type="button" disabled={deletingExpense} onClick={closeExpenseDelete}>Cancelar</button><button className="danger-button" type="button" disabled={deletingExpense} onClick={()=>void confirmExpenseDeletion()}>{deletingExpense ? "Excluindo…" : "Excluir gasto"}</button></>}><div className="delete-confirm-copy"><span aria-hidden="true"><Icon name="trash"/></span><div><b>{expenseToDelete.description ?? "Gasto sem descrição"}</b><small>{formatMoney(expenseToDelete.amountCents)}</small></div></div>{expenseDeleteError&&<p className="delete-confirm-error" role="alert">{expenseDeleteError}</p>}</DialogFrame>}
     {expenseEdit.id > 0 && <div className="modal-backdrop"><section className="edit-modal" role="dialog" aria-modal="true" aria-labelledby="expense-edit-title"><h2 id="expense-edit-title">Editar gasto</h2><form className="form" onSubmit={updateExpense}><label>Valor (R$)<input autoFocus inputMode="decimal" maxLength={16} value={expenseEdit.amount} onChange={event=>setExpenseEdit({...expenseEdit,amount:event.target.value})} required/></label><label className="wide">Onde foi gasto?<input maxLength={MAX_DESCRIPTION_LENGTH} value={expenseEdit.description} onChange={event=>setExpenseEdit({...expenseEdit,description:event.target.value})} required={!expenseEdit.imported}/></label><label>Categoria<select value={expenseEdit.categoryId} onChange={event=>setExpenseEdit({...expenseEdit,categoryId:event.target.value})} required={!expenseEdit.imported}><option value="">Sem categoria</option>{expenseCategories.map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select></label><label>Pagamento<select value={expenseEdit.paymentMethod} onChange={event=>setExpenseEdit({...expenseEdit,paymentMethod:event.target.value})} required={!expenseEdit.imported}><option value="">Não informado</option>{payments.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label><label>Quem lançou?<select value={expenseEdit.person} onChange={event=>setExpenseEdit({...expenseEdit,person:event.target.value})} required={!expenseEdit.imported}><option value="">Não informado</option>{data.members.map(member=><option key={member.id} value={member.name}>{member.name}</option>)}</select></label><label>Data<input type="date" min="2000-01-01" max="2200-12-31" value={expenseEdit.occurredAt} onChange={event=>setExpenseEdit({...expenseEdit,occurredAt:event.target.value})} required={!expenseEdit.imported}/></label>{expenseEdit.imported&&<label>Mês de destino<input type="month" min="2000-01" max="2200-12" value={expenseEdit.referenceMonth} onChange={event=>setExpenseEdit({...expenseEdit,referenceMonth:event.target.value})} required/></label>}<div className="modal-actions wide"><button className="secondary" type="button" onClick={()=>setExpenseEdit(current=>({...current,id:0}))}>Cancelar</button><button className="primary" type="submit">Salvar gasto</button></div></form></section></div>}
     {incomeEdit.id > 0 && <div className="modal-backdrop"><section className="edit-modal" role="dialog" aria-modal="true" aria-labelledby="income-edit-title"><h2 id="income-edit-title">Editar entrada</h2><form className="income-form" onSubmit={updateIncome}><label>Valor (R$)<input autoFocus inputMode="decimal" maxLength={16} value={incomeEdit.amount} onChange={event=>setIncomeEdit({...incomeEdit,amount:event.target.value})} required/></label><label>Descrição<input maxLength={MAX_DESCRIPTION_LENGTH} value={incomeEdit.description} onChange={event=>setIncomeEdit({...incomeEdit,description:event.target.value})} required/></label><label>Categoria<select value={incomeEdit.categoryId} onChange={event=>setIncomeEdit({...incomeEdit,categoryId:event.target.value})} required><option value="">Selecione uma categoria</option>{incomeCategories.map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select></label><label>Quem lançou?<select value={incomeEdit.person} onChange={event=>setIncomeEdit({...incomeEdit,person:event.target.value})} required>{data.members.map(member=><option key={member.id} value={member.name}>{member.name}</option>)}</select></label><label>Data<input type="date" min="2000-01-01" max="2200-12-31" value={incomeEdit.occurredAt} onChange={event=>setIncomeEdit({...incomeEdit,occurredAt:event.target.value})} required/></label><div className="modal-actions"><button className="secondary" type="button" onClick={()=>setIncomeEdit(current=>({...current,id:0}))}>Cancelar</button><button className="primary" type="submit">Salvar entrada</button></div></form></section></div>}
     {memberEdit.id > 0 && <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setMemberEdit({id:0,name:"",email:""})}}><section className="edit-modal member-edit-modal" role="dialog" aria-modal="true" aria-labelledby="member-edit-title"><h2 id="member-edit-title">Editar integrante</h2><form className="income-form" onSubmit={updateMember}><label>Nome<input autoFocus maxLength={MAX_NAME_LENGTH} value={memberEdit.name} onChange={event=>setMemberEdit({...memberEdit,name:event.target.value})} required/></label><label>E-mail de acesso<input type="email" maxLength={MAX_EMAIL_LENGTH} value={memberEdit.email} onChange={event=>setMemberEdit({...memberEdit,email:event.target.value})} required/></label><p className="member-edit-help">Ao trocar o e-mail, o acesso anterior é removido e a nova conta precisa entrar usando exatamente este endereço.</p><div className="modal-actions"><button className="secondary" type="button" onClick={()=>setMemberEdit({id:0,name:"",email:""})}>Cancelar</button><button className="primary" type="submit">Salvar integrante</button></div></form></section></div>}
