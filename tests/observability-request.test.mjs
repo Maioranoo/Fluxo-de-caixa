@@ -59,5 +59,8 @@ test("Worker uses contextual request and does not inspect bodies", async () => {
   assert.match(source, /responseWithRequestId/);
   assert.match(source, /request_completed/);
   assert.match(source, /slow_request/);
+  assert.match(source, /markErrorObserved/);
+  assert.match(source, /unexpected_error/);
+  assert.match(source, /request_failed/);
   assert.doesNotMatch(source, /\.text\(\)|\.json\(\)|\.arrayBuffer\(\)/);
 });

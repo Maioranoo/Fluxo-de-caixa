@@ -6,6 +6,7 @@ import { cleanupRateLimits, enforceRateLimits, requestRateLimitChecks } from "..
 import { getObservabilityConfig } from "../app/lib/server/observability/config.ts";
 import { createLogger } from "../app/lib/server/observability/logger.ts";
 import { createRequestContext, requestWithContext, responseWithRequestId } from "../app/lib/server/observability/request-context.ts";
+import { markErrorObserved } from "../app/lib/server/observability/measure.ts";
 
 interface Env {
   ASSETS: Fetcher;
@@ -77,6 +78,7 @@ const worker = {
     try {
       return report(await handler.fetch(contextualRequest, env, ctx));
     } catch (error) {
+      if (markErrorObserved(error)) logger.error("unexpected_error", { status: 500, durationMs: performance.now() - started, origin: "worker", ...(error instanceof Error ? { errorName: error.name, errorMessage: error.message, errorStack: error.stack } : {}) });
       logger.error("request_failed", { status: 500, durationMs: performance.now() - started, origin: "worker" });
       throw error;
     }
