@@ -4,18 +4,22 @@ import { AccessError, requireHousehold } from "../../../../db/tenancy";
 import { householdMembers, households } from "../../../../db/schema";
 import { MAX_MEMBERS, normalizeEmail, normalizeName, parsePositiveSafeInteger, validateMembers } from "../../../lib/validation";
 import { assertSameSite, readJsonObject } from "../../security";
+import { markErrorObserved } from "../../../lib/server/observability/measure.ts";
+import { observabilityForRequest } from "../../../lib/server/observability/runtime.ts";
 
 type NewMember = { name?: unknown; email?: unknown };
 
 export async function GET(request: Request) {
+  const { logger } = observabilityForRequest(request), started = performance.now();
   try {
     const context = await requireAdmin(request), db = getDb();
     const rows = await db.select({ id: households.id, name: households.name, allowIncome: households.allowIncome, createdAt: households.createdAt }).from(households).orderBy(asc(households.name));
     return Response.json({ households: rows, currentHouseholdId: context.householdId });
-  } catch (error) { return errorResponse(error); }
+  } catch (error) { return errorResponse(error, logger, started, "admin.households.read"); }
 }
 
 export async function POST(request: Request) {
+  const { logger } = observabilityForRequest(request), started = performance.now();
   try {
     assertSameSite(request);
     const context = await requireAdmin(request);
@@ -27,6 +31,7 @@ export async function POST(request: Request) {
       if (!member) return Response.json({ error: "O nome deve conter letras e ter até 80 caracteres; informe também um email válido." }, { status: 400 });
       try {
         const [created] = await getDb().insert(householdMembers).values({ householdId: context.householdId, email: member.email, displayName: member.name, role: "member" }).returning({ id: householdMembers.id, name: householdMembers.displayName, email: householdMembers.email, role: householdMembers.role });
+        logger.info("admin_member_created", { operation: "admin.member.create", outcome: "success", durationMs: performance.now() - started });
         return Response.json({ member: created }, { status: 201 });
       } catch { return Response.json({ error: "Este e-mail já pertence a uma família." }, { status: 409 }); }
     }
@@ -46,11 +51,13 @@ export async function POST(request: Request) {
       await db.delete(households).where(eq(households.id, household.id));
       throw error;
     }
+    logger.info("admin_household_created", { operation: "admin.household.create", outcome: "success", durationMs: performance.now() - started, count: members.length });
     return Response.json({ household: { id: household.id, name: household.name, allowIncome: household.allowIncome }, members }, { status: 201 });
-  } catch (error) { return errorResponse(error); }
+  } catch (error) { return errorResponse(error, logger, started, "admin.create"); }
 }
 
 export async function PATCH(request: Request) {
+  const { logger } = observabilityForRequest(request), started = performance.now();
   try {
     assertSameSite(request);
     const context = await requireAdmin(request);
@@ -63,6 +70,7 @@ export async function PATCH(request: Request) {
       if (existing.email === context.email && member.email !== context.email) return Response.json({ error: "O e-mail do administrador não pode ser alterado aqui." }, { status: 400 });
       try {
         const [updated] = await db.update(householdMembers).set({ displayName: member.name, email: member.email, userId: existing.email === member.email ? undefined : null }).where(and(eq(householdMembers.id, id), eq(householdMembers.householdId, context.householdId))).returning({ id: householdMembers.id, name: householdMembers.displayName, email: householdMembers.email, role: householdMembers.role });
+        if (updated) logger.info("admin_member_updated", { operation: "admin.member.update", outcome: "success", durationMs: performance.now() - started });
         return Response.json({ member: updated });
       } catch { return Response.json({ error: "Este e-mail já pertence a uma família." }, { status: 409 }); }
     }
@@ -71,11 +79,13 @@ export async function PATCH(request: Request) {
     if (!householdId || typeof body.allowIncome !== "boolean") return Response.json({ error: "Configuração inválida." }, { status: 400 });
     const db = getDb();
     const [household] = await db.update(households).set({ allowIncome: body.allowIncome }).where(eq(households.id, householdId)).returning({ id: households.id, name: households.name, allowIncome: households.allowIncome });
+    if (household) logger.info("admin_household_updated", { operation: "admin.household.update", outcome: "success", durationMs: performance.now() - started });
     return household ? Response.json({ household }) : Response.json({ error: "Família não encontrada." }, { status: 404 });
-  } catch (error) { return errorResponse(error); }
+  } catch (error) { return errorResponse(error, logger, started, "admin.update"); }
 }
 
 export async function DELETE(request: Request) {
+  const { logger } = observabilityForRequest(request), started = performance.now();
   try {
     assertSameSite(request);
     const context = await requireAdmin(request), url = new URL(request.url), id = parsePositiveSafeInteger(url.searchParams.get("id")), db = getDb();
@@ -86,8 +96,9 @@ export async function DELETE(request: Request) {
     if (member.email === context.email) return Response.json({ error: "O acesso do administrador não pode ser removido." }, { status: 400 });
     if (rows.length <= 1) return Response.json({ error: "A família precisa ter pelo menos um integrante." }, { status: 400 });
     await db.delete(householdMembers).where(and(eq(householdMembers.id, id), eq(householdMembers.householdId, context.householdId)));
+    logger.info("admin_member_deleted", { operation: "admin.member.delete", outcome: "success", durationMs: performance.now() - started, deletedCount: 1 });
     return Response.json({ ok: true });
-  } catch (error) { return errorResponse(error); }
+  } catch (error) { return errorResponse(error, logger, started, "admin.member.delete"); }
 }
 
 async function requireAdmin(request: Request) {
@@ -101,8 +112,8 @@ function normalizeMember(input: NewMember) {
   return name && email ? { name, email } : null;
 }
 
-function errorResponse(error: unknown) {
+function errorResponse(error: unknown, logger: ReturnType<typeof observabilityForRequest>["logger"], started: number, operation: string) {
   if (error instanceof AccessError) return Response.json({ error: error.message }, { status: error.status, headers: error.headers });
-  console.error("Request failed");
+  if (markErrorObserved(error)) logger.error("unexpected_error", { operation, status: 500, durationMs: performance.now() - started, ...(error instanceof Error ? { errorName: error.name, errorMessage: error.message, errorStack: error.stack } : {}) });
   return Response.json({ error: "Não foi possível atualizar o painel administrativo agora." }, { status: 500 });
 }

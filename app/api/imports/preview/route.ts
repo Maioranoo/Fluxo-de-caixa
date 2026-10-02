@@ -7,27 +7,30 @@ import { classifyExpense } from "../../../lib/imports/classifier.ts";
 import { fingerprintImportRow, normalizeMerchant } from "../../../lib/imports/fingerprint.ts";
 import { MAX_IMPORT_BYTES, validatePreviewPayload } from "../../../lib/imports/validation.ts";
 import type { ImportRowWarning, PreviewImportRow } from "../../../lib/imports/types.ts";
+import { markErrorObserved, measureOperation } from "../../../lib/server/observability/measure.ts";
+import { observabilityForRequest } from "../../../lib/server/observability/runtime.ts";
 
 export async function POST(request: Request) {
+  const { logger, config } = observabilityForRequest(request), started = performance.now();
   try {
     assertSameSite(request);
     const context = await requireHousehold(request);
     const payload = validatePreviewPayload(await readJsonObject(request, MAX_IMPORT_BYTES));
     if (!payload.ok) return Response.json({ error: payload.error }, { status: 400 });
     const db = getDb();
-    const [categoryRows, learnedRows, historyRows, fingerprintRows, matchingFiles] = await Promise.all([
+    const [categoryRows, learnedRows, historyRows, fingerprintRows, matchingFiles] = await measureOperation(logger, { operation: "database.import_preview", kind: "database", databaseBaselineLogging: config.databaseBaselineLogging, slowThresholdMs: config.slowDatabaseQueryMs }, () => Promise.all([
       db.select({ id: categories.id, name: categories.name }).from(categories).where(and(eq(categories.householdId, context.householdId), eq(categories.kind, "expense"))),
       db.select({ pattern: categoryRules.pattern, categoryId: categoryRules.categoryId }).from(categoryRules).where(eq(categoryRules.householdId, context.householdId)),
       db.select({ merchant: expenses.description, categoryId: expenses.categoryId }).from(expenses).where(and(eq(expenses.householdId, context.householdId), isNotNull(expenses.description), isNotNull(expenses.categoryId))),
       db.select({ fingerprint: expenses.importFingerprint }).from(expenses).where(and(eq(expenses.householdId, context.householdId), eq(expenses.referenceMonth, payload.value.referenceMonth), isNotNull(expenses.importFingerprint))),
       db.select({ id: importBatches.id }).from(importBatches).where(and(eq(importBatches.householdId, context.householdId), eq(importBatches.fileHash, payload.value.fileHash))).limit(1),
-    ]);
+    ]));
     const existingFingerprints = new Set(fingerprintRows.map(row => row.fingerprint).filter((value): value is string => Boolean(value)));
-    const prepared = await Promise.all(payload.value.rows.map(async row => prepareRow(row, payload.value.mode, payload.value.referenceMonth, context.householdId, {
+    const prepared = await measureOperation(logger, { operation: "import.preview.classify", kind: "application", completedEvent: "import_classification_completed", fields: { count: payload.value.rows.length, mode: payload.value.mode } }, () => Promise.all(payload.value.rows.map(async row => prepareRow(row, payload.value.mode, payload.value.referenceMonth, context.householdId, {
       categories: categoryRows,
       learned: learnedRows,
       history: historyRows.filter((item): item is { merchant: string; categoryId: number } => Boolean(item.merchant) && Boolean(item.categoryId)),
-    })));
+    }))));
     const counts = new Map<string, number>();
     prepared.forEach(row => { if (row.fingerprint) counts.set(row.fingerprint, (counts.get(row.fingerprint) ?? 0) + 1); });
     const rows = prepared.map(row => {
@@ -35,9 +38,10 @@ export async function POST(request: Request) {
       const warnings = duplicate ? uniqueWarnings([...row.warnings, "possible_duplicate"]) : row.warnings;
       return { ...row, warnings, selected: duplicate || warnings.includes("excluded_credit") || warnings.includes("invalid_amount") ? false : row.selected };
     });
+    logger.info("import_preview_completed", { operation: "import.preview", outcome: "success", durationMs: performance.now() - started, count: rows.length, mode: payload.value.mode });
     return Response.json({ rows, existingFile: matchingFiles.length > 0, categories: categoryRows });
   } catch (error) {
-    return routeError(error);
+    return routeError(error, logger, started);
   }
 }
 
@@ -73,8 +77,8 @@ function uniqueWarnings(warnings: ImportRowWarning[]) {
   return [...new Set(warnings)];
 }
 
-function routeError(error: unknown) {
+function routeError(error: unknown, logger: ReturnType<typeof observabilityForRequest>["logger"], started: number) {
   if (error instanceof AccessError) return Response.json({ error: error.message }, { status: error.status, headers: error.headers });
-  console.error("Import preview failed");
+  if (markErrorObserved(error)) logger.error("unexpected_error", { operation: "import.preview", status: 500, durationMs: performance.now() - started, ...(error instanceof Error ? { errorName: error.name, errorMessage: error.message, errorStack: error.stack } : {}) });
   return Response.json({ error: "Não foi possível preparar a conferência do arquivo." }, { status: 500 });
 }
