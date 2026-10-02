@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { FinanceDashboard } from "./components/finance-dashboard";
 import { adjacentMonths } from "./lib/finance-client";
 import { loadFinanceData } from "./lib/server/finance-data";
+import { observabilityForRequest } from "./lib/server/observability/runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,7 @@ export default async function Home() {
   const month = saoPauloMonth();
   const requestHeaders = await headers();
   const request = new Request(initialRequestUrl(requestHeaders), { headers: requestHeaders });
+  const { logger } = observabilityForRequest(request);
   let initialFinance = null;
 
   try {
@@ -17,6 +19,7 @@ export default async function Home() {
       payload: await loadFinanceData(request, month, [month, ...adjacentMonths(month)].sort().join(",")),
     };
   } catch {
+    logger.warn("initial_finance_load_failed", { operation: "initial_render_data" });
     // The browser API remains the fallback for transient database/runtime errors.
   }
 

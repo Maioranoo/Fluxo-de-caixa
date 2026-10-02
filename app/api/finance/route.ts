@@ -7,13 +7,16 @@ import { assertSameSite, readJsonObject } from "../security";
 import { normalizeMerchant } from "../../lib/imports/fingerprint.ts";
 import { expenseDeletionFilter } from "../../lib/server/expense-deletion.ts";
 import { InvalidFinanceMonthsError, loadFinanceData } from "../../lib/server/finance-data.ts";
+import { measureOperation, markErrorObserved } from "../../lib/server/observability/measure.ts";
+import { observabilityForRequest } from "../../lib/server/observability/runtime.ts";
 
 export async function GET(request: Request) {
+  const { logger } = observabilityForRequest(request);
   try {
     const started = performance.now();
     const url = new URL(request.url);
     const month = url.searchParams.get("month") ?? new Date().toISOString().slice(0, 7);
-    const payload = await loadFinanceData(request, month, url.searchParams.get("months"));
+    const payload = await measureOperation(logger, { operation: "finance.fetch", kind: "application", completedEvent: "finance_fetch_completed" }, () => loadFinanceData(request, month, url.searchParams.get("months")));
     return Response.json(payload, { headers: { "Cache-Control": "private, no-store", "Server-Timing": `total;dur=${(performance.now() - started).toFixed(1)}` } });
   } catch (error) {
     if (error instanceof InvalidFinanceMonthsError) return Response.json({ error: error.message }, { status: 400 });
@@ -22,6 +25,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const { logger } = observabilityForRequest(request), started = performance.now();
   try {
     assertSameSite(request);
     const context = await requireHousehold(request), body = await readJsonObject(request), db = getDb();
@@ -37,6 +41,7 @@ export async function POST(request: Request) {
       if (!isValidDateInput(body.occurredAt)) return invalid("Selecione uma data válida entre 2000 e 2200.");
       if (typeof body.person !== "string" || !allowedPeople.some(person => person.name === body.person)) return invalid("Selecione um integrante válido.");
       const [income] = await db.insert(incomes).values({ householdId: context.householdId, amountCents, description, categoryId, person: body.person, occurredAt: body.occurredAt as string }).returning({ id: incomes.id, amountCents: incomes.amountCents, description: incomes.description, categoryId: incomes.categoryId, person: incomes.person, occurredAt: incomes.occurredAt });
+      logger.info("income_created", { operation: "income.create", outcome: "success", durationMs: performance.now() - started });
       return Response.json({ income: { ...income, category: ownedCategory.name } }, { status: 201 });
     }
     if (body.type === "category") {
@@ -47,6 +52,7 @@ export async function POST(request: Request) {
       if (kind === "income" && !household?.allowIncome) return Response.json({ error: "Categorias de entrada não estão disponíveis para esta carteira." }, { status: 403 });
       try {
         const [category] = await db.insert(categories).values({ householdId: context.householdId, name, kind }).returning({ id: categories.id, name: categories.name, kind: categories.kind });
+        logger.info("category_created", { operation: "category.create", outcome: "success", durationMs: performance.now() - started });
         return Response.json({ category }, { status: 201 });
       } catch { return Response.json({ error: "Essa categoria já existe nesta família." }, { status: 409 }); }
     }
@@ -57,6 +63,7 @@ export async function POST(request: Request) {
       const isCard = body.isCard;
       try {
         const [payment] = await db.insert(paymentMethods).values({ householdId: context.householdId, key: `pagamento_${crypto.randomUUID()}`, name, isCard }).returning();
+        logger.info("payment_created", { operation: "payment.create", outcome: "success", durationMs: performance.now() - started });
         return Response.json({ payment }, { status: 201 });
       } catch { return Response.json({ error: "Essa forma de pagamento já existe nesta família." }, { status: 409 }); }
     }
@@ -80,11 +87,13 @@ export async function POST(request: Request) {
     const installmentGroupId = installmentCount > 1 ? crypto.randomUUID() : null;
     const rows = Array.from({ length: installmentCount }, (_, index) => ({ householdId: context.householdId, installmentGroupId, amountCents: baseAmount + (index < remainder ? 1 : 0), description: installmentCount > 1 ? `${description} (${index + 1}/${installmentCount})` : description, categoryId, paymentMethod: body.paymentMethod as string, person: body.person as string, occurredAt: addMonths(body.occurredAt as string, index) }));
     const created = await db.insert(expenses).values(rows).returning();
+    logger.info("expense_created", { operation: "expense.create", outcome: "success", durationMs: performance.now() - started, count: created.length });
     return Response.json({ expenses: created.map(item => ({ ...item, category: ownedCategory.name })), installments: installmentCount }, { status: 201 });
-  } catch (error) { return accessResponse(error); }
+  } catch (error) { return accessResponse(error, logger, started); }
 }
 
 export async function PATCH(request: Request) {
+  const { logger } = observabilityForRequest(request), started = performance.now();
   try {
     assertSameSite(request);
     const context = await requireHousehold(request), body = await readJsonObject(request), db = getDb();
@@ -117,6 +126,7 @@ export async function PATCH(request: Request) {
       if (expense && currentExpense.importBatchId && amountCents !== currentExpense.amountCents) await db.update(importBatches).set({ totalCents: sql`${importBatches.totalCents} + ${amountCents - currentExpense.amountCents}` }).where(and(eq(importBatches.id, currentExpense.importBatchId), eq(importBatches.householdId, context.householdId)));
       const pattern = normalizeMerchant(importedDescription);
       if (expense && imported && ownedCategory && pattern) await db.insert(categoryRules).values({ householdId: context.householdId, categoryId: ownedCategory.id, pattern, source: "learned" }).onConflictDoUpdate({ target: [categoryRules.householdId, categoryRules.pattern], set: { categoryId: ownedCategory.id, updatedAt: sql`CURRENT_TIMESTAMP` } });
+      if (expense) logger.info("expense_updated", { operation: "expense.update", outcome: "success", durationMs: performance.now() - started });
       return expense ? Response.json({ expense: { ...expense, category: ownedCategory?.name ?? null } }) : Response.json({ error: "Gasto não encontrado." }, { status: 404 });
     }
     if (body.type === "income") {
@@ -160,10 +170,11 @@ export async function PATCH(request: Request) {
       const [category] = await db.update(categories).set({ name, kind }).where(and(eq(categories.id, id), eq(categories.householdId, context.householdId))).returning({ id: categories.id, name: categories.name, kind: categories.kind });
       return category ? Response.json({ category }) : Response.json({ error: "Categoria não encontrada." }, { status: 404 });
     } catch { return Response.json({ error: "Já existe uma categoria com esse nome." }, { status: 409 }); }
-  } catch (error) { return accessResponse(error); }
+  } catch (error) { return accessResponse(error, logger, started); }
 }
 
 export async function DELETE(request: Request) {
+  const { logger } = observabilityForRequest(request), started = performance.now();
   try {
     assertSameSite(request);
     const context = await requireHousehold(request), url = new URL(request.url), id = parsePositiveSafeInteger(url.searchParams.get("id")), type = url.searchParams.get("type"), db = getDb();
@@ -177,6 +188,7 @@ export async function DELETE(request: Request) {
         const updateBatch = db.update(importBatches).set({ itemCount: sql`max(${importBatches.itemCount} - 1, 0)`, totalCents: sql`${importBatches.totalCents} - ${current.amountCents}` }).where(and(eq(importBatches.id, current.importBatchId), eq(importBatches.householdId, context.householdId)));
         [deleted] = await db.batch([removeExpense, updateBatch]);
       } else [deleted] = await db.batch([removeExpense]);
+      if (deleted.length) logger.info("expense_deleted", { operation: "expense.delete", outcome: "success", durationMs: performance.now() - started, deletedCount: deleted.length });
       return deleted.length ? Response.json({ ok: true, deletedIds: deleted.map(item => item.id) }) : Response.json({ error: "Gasto não encontrado." }, { status: 404 });
     }
     if (type === "income") {
@@ -202,9 +214,9 @@ export async function DELETE(request: Request) {
     ]);
     const deleted = results[1] as { id: number }[];
     return deleted.length ? Response.json({ ok: true }) : Response.json({ error: "Categoria não encontrada." }, { status: 404 });
-  } catch (error) { return accessResponse(error); }
+  } catch (error) { return accessResponse(error, logger, started); }
 }
 
-function accessResponse(error: unknown) { if (error instanceof AccessError) return Response.json({ error: error.message }, { status: error.status, headers: error.headers }); console.error("Request failed"); return Response.json({ error: "Não foi possível acessar os dados agora." }, { status: 500 }); }
+function accessResponse(error: unknown, logger?: ReturnType<typeof observabilityForRequest>["logger"], started = performance.now()) { if (error instanceof AccessError) return Response.json({ error: error.message }, { status: error.status, headers: error.headers }); if (logger && markErrorObserved(error)) logger.error("unexpected_error", { operation: "finance.request", status: 500, durationMs: performance.now() - started, ...(error instanceof Error ? { errorName: error.name, errorMessage: error.message, errorStack: error.stack } : {}) }); return Response.json({ error: "Não foi possível acessar os dados agora." }, { status: 500 }); }
 function invalid(error: string) { return Response.json({ error }, { status: 400 }); }
 function addMonths(date: string, offset: number) { const [year, month, day] = date.split("-").map(Number); const first = new Date(Date.UTC(year, month - 1 + offset, 1)); const lastDay = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate(); return `${first.getUTCFullYear()}-${String(first.getUTCMonth() + 1).padStart(2, "0")}-${String(Math.min(day, lastDay)).padStart(2, "0")}`; }
