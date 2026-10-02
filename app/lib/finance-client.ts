@@ -1,6 +1,9 @@
 import type { FinanceData } from "./finance-ui.ts";
 
-type Result = { response: { status: number; ok: boolean }; payload: FinanceData & { error?: string } };
+type MonthData = Pick<FinanceData, "expenses" | "incomes">;
+type Result = { response: { status: number; ok: boolean }; payload: FinanceData & { error?: string; prefetchedMonths?: Record<string, MonthData> } };
+
+const CACHE_TTL_MS = 5 * 60_000;
 
 /** Per-mounted-panel memory only: never persist financial data or share between sessions. */
 export function createFinanceClient(fetcher: typeof fetch = fetch, now = Date.now) {
@@ -13,7 +16,8 @@ export function createFinanceClient(fetcher: typeof fetch = fetch, now = Date.no
     if (hit && hit.expires > now()) return Promise.resolve(hit.result);
     if (pending.has(key)) return pending.get(key)!;
     const started = generation;
-    const promise = fetcher(`/api/finance?month=${encodeURIComponent(month)}`, {
+    const months = [month, ...adjacentMonths(month)].sort();
+    const promise = fetcher(`/api/finance?month=${encodeURIComponent(month)}&months=${encodeURIComponent(months.join(","))}`, {
       cache: "no-store", headers: household ? { "x-household-id": household } : {},
     }).then(async response => ({ response: { status: response.status, ok: response.ok }, payload: await response.json() as Result["payload"] }))
       .then(result => {
@@ -21,7 +25,15 @@ export function createFinanceClient(fetcher: typeof fetch = fetch, now = Date.no
         if (result.response.status === 401 || result.response.status === 403) invalidate();
         else if (result.response.ok && !result.payload.error) {
           cache.delete(key);
-          cache.set(key, { result, expires: now() + 30_000 });
+          cache.set(key, { result, expires: now() + CACHE_TTL_MS });
+          for (const [prefetchedMonth, monthData] of Object.entries(result.payload.prefetchedMonths ?? {})) {
+            const prefetchedKey = `${household}:${prefetchedMonth}`;
+            cache.delete(prefetchedKey);
+            cache.set(prefetchedKey, {
+              result: { response: result.response, payload: { ...result.payload, ...monthData, prefetchedMonths: undefined } },
+              expires: now() + CACHE_TTL_MS,
+            });
+          }
           if (cache.size > 6) cache.delete(cache.keys().next().value!);
         }
         return result;

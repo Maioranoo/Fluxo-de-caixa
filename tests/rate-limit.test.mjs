@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
-import { enforceRateLimit, requestPolicies, clientIdentity, cleanupRateLimits } from "../app/lib/server/rate-limit.ts";
+import * as rateLimit from "../app/lib/server/rate-limit.ts";
+
+const { enforceRateLimit, requestPolicies, clientIdentity, cleanupRateLimits } = rateLimit;
 
 function store() {
   const sqlite = new DatabaseSync(":memory:");
@@ -67,6 +69,35 @@ test("todas as políticas da identidade usam uma única operação no banco", as
       ],
     );
   } finally { sqlite.close(); }
+});
+
+test("limites de IP e usuário autenticado são aplicados em uma única operação", async () => {
+  assert.equal(typeof rateLimit.enforceRateLimits, "function");
+  const { sqlite, db, getPrepareCalls } = store();
+  try {
+    await rateLimit.enforceRateLimits(db, [
+      { identity: "ip:192.0.2.10", policies: [{ scope: "all", limit: 300 }] },
+      { identity: "user:user-123", policies: [{ scope: "api", limit: 120 }, { scope: "write", limit: 30 }] },
+    ], 61000);
+    assert.equal(getPrepareCalls(), 1);
+    assert.deepEqual(
+      sqlite.prepare("SELECT substr(bucket_key, 1, instr(bucket_key, ':') - 1) AS scope, hits FROM request_rate_limits ORDER BY scope").all().map(row => ({ ...row })),
+      [{ scope: "all", hits: 1 }, { scope: "api", hits: 1 }, { scope: "write", hits: 1 }],
+    );
+  } finally { sqlite.close(); }
+});
+
+test("HTML não consulta o banco e APIs agrupam limites de IP e usuário", () => {
+  assert.equal(typeof rateLimit.requestRateLimitChecks, "function");
+  assert.deepEqual(rateLimit.requestRateLimitChecks(new Request("https://app.example/")), []);
+  const checks = rateLimit.requestRateLimitChecks(new Request("https://app.example/api/finance", {
+    headers: { "cf-connecting-ip": "192.0.2.10", "oai-authenticated-user-id": "user-123" },
+  }));
+  assert.equal(checks.length, 2);
+  assert.equal(checks[0].identity, "ip:192.0.2.10");
+  assert.equal(checks[1].identity, "user:user-123");
+  assert.deepEqual(checks[0].policies.map(policy => policy.scope), ["all", "api"]);
+  assert.deepEqual(checks[1].policies.map(policy => policy.scope), ["all", "api"]);
 });
 
 test("public, authenticated and unknown paths all have a shared cap; imports have a stricter cap", () => {

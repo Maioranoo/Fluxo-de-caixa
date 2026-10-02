@@ -1,11 +1,10 @@
 import "server-only";
 import { env } from "cloudflare:workers";
 import { eq, isNull, or } from "drizzle-orm";
-import { getDb, getD1 } from ".";
+import { getDb } from ".";
 import { categories, expenses, householdMembers, households, paymentMethods } from "./schema";
 import { normalizeEmail, parsePositiveSafeInteger } from "../app/lib/validation";
 import { AccessError } from "../app/lib/server/http-security.ts";
-import { enforceRateLimit, requestPolicies } from "../app/lib/server/rate-limit.ts";
 export { AccessError } from "../app/lib/server/http-security.ts";
 
 type RuntimeConfig = {
@@ -56,8 +55,6 @@ export async function requireHousehold(request: Request): Promise<HouseholdConte
       .where(eq(householdMembers.email, email)).limit(1);
   }
   if (!member) throw new AccessError("Seu e-mail ainda não foi vinculado a uma família.", 403);
-
-  await enforceRateLimit(getD1(), `member:${member.memberId}`, requestPolicies(request));
 
   if (userId && member.userId !== userId) await db.update(householdMembers).set({ userId }).where(eq(householdMembers.id, member.memberId));
   const isAdmin = local || email === config.ADMIN_EMAIL?.trim().toLowerCase();

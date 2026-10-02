@@ -2,7 +2,7 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { AccessError } from "../app/lib/server/http-security.ts";
-import { cleanupRateLimits, clientIdentity, enforceRateLimit, requestPolicies } from "../app/lib/server/rate-limit.ts";
+import { cleanupRateLimits, enforceRateLimits, requestRateLimitChecks } from "../app/lib/server/rate-limit.ts";
 
 interface Env {
   ASSETS: Fetcher;
@@ -32,7 +32,7 @@ const worker = {
     const url = new URL(request.url);
 
     try {
-      await enforceRateLimit(env.DB, clientIdentity(request), requestPolicies(request));
+      await enforceRateLimits(env.DB, requestRateLimitChecks(request));
     } catch (error) {
       if (error instanceof AccessError) return Response.json({ error: error.message }, { status: error.status, headers: error.headers });
       return Response.json({ error: "Proteção de acesso indisponível." }, { status: 503 });

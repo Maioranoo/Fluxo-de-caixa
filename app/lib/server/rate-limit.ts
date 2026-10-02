@@ -12,6 +12,7 @@ export interface RateLimitDatabase {
 }
 
 export type RatePolicy = { scope: string; limit: number };
+export type RateLimitCheck = { identity: string; policies: RatePolicy[] };
 export const WINDOW_SECONDS = 60;
 
 export function requestPolicies(request: Request): RatePolicy[] {
@@ -26,13 +27,21 @@ export function requestPolicies(request: Request): RatePolicy[] {
 }
 
 export async function enforceRateLimit(db: RateLimitDatabase, identity: string, policies: RatePolicy[], now = Date.now()) {
+  return enforceRateLimits(db, [{ identity, policies }], now);
+}
+
+export async function enforceRateLimits(db: RateLimitDatabase, checks: RateLimitCheck[], now = Date.now()) {
+  if (!checks.length) return;
   const seconds = Math.floor(now / 1000);
   const expiresAt = (Math.floor(seconds / WINDOW_SECONDS) + 1) * WINDOW_SECONDS;
   // Do not persist clear-text IP addresses, email addresses or authentication headers.
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(identity));
-  const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+  const encoded = new TextEncoder();
+  const hashes = await Promise.all(checks.map(async check => {
+    const digest = await crypto.subtle.digest("SHA-256", encoded.encode(check.identity));
+    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+  }));
   try {
-    const buckets = policies.map(policy => ({ key: `${policy.scope}:${hash}`, limit: policy.limit }));
+    const buckets = checks.flatMap((check, index) => check.policies.map(policy => ({ key: `${policy.scope}:${hashes[index]}`, limit: policy.limit })));
     const result = await db.prepare(`
       INSERT INTO request_rate_limits (bucket_key, hits, expires_at)
       SELECT json_extract(value, '$.key'), 1, ?
@@ -43,7 +52,7 @@ export async function enforceRateLimit(db: RateLimitDatabase, identity: string, 
         expires_at = CASE WHEN request_rate_limits.expires_at <= ? THEN excluded.expires_at ELSE request_rate_limits.expires_at END
       RETURNING bucket_key, hits, expires_at
     `).bind(expiresAt, JSON.stringify(buckets), seconds, seconds).all<{ bucket_key: string; hits: number; expires_at: number }>();
-    if (result.results.length !== policies.length) throw new Error("Rate limit storage unavailable");
+    if (result.results.length !== buckets.length) throw new Error("Rate limit storage unavailable");
     const rows = new Map(result.results.map(row => [row.bucket_key, row]));
     for (const bucket of buckets) {
       const row = rows.get(bucket.key);
@@ -55,6 +64,16 @@ export async function enforceRateLimit(db: RateLimitDatabase, identity: string, 
     // Fail closed: a missing migration or database outage must not remove protection.
     throw new AccessError("Proteção de acesso temporariamente indisponível.", 503, { "Retry-After": "60", "Cache-Control": "no-store" });
   }
+}
+
+export function requestRateLimitChecks(request: Request): RateLimitCheck[] {
+  const path = new URL(request.url).pathname;
+  if (path !== "/api" && !path.startsWith("/api/")) return [];
+  const policies = requestPolicies(request);
+  const checks: RateLimitCheck[] = [{ identity: clientIdentity(request), policies }];
+  const userId = request.headers.get("oai-authenticated-user-id")?.trim();
+  if (userId) checks.push({ identity: `user:${userId}`, policies });
+  return checks;
 }
 
 export async function cleanupRateLimits(db: RateLimitDatabase, now = Date.now()) {

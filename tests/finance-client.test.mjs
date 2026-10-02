@@ -19,10 +19,35 @@ test("expired data and rejected access are never reused", async () => {
   let now = 0, calls = 0;
   const client = createFinanceClient(async () => { calls++; return Response.json({}, { status: calls === 2 ? 403 : 200 }); }, () => now);
   await client.read("2026-10", "1");
-  now = 31000;
+  now = 300001;
   await client.read("2026-10", "1");
   await client.read("2026-10", "1");
   assert.equal(calls, 3);
+});
+
+test("one request warms the previous and next month caches", async () => {
+  const urls = [];
+  const client = createFinanceClient(async url => {
+    urls.push(String(url));
+    return Response.json({
+      categories: [], expenses: [{ id: 10 }], incomes: [], members: [], payments: [], households: [], household: { id: 1 }, currentMember: "Ana", isAdmin: false,
+      prefetchedMonths: {
+        "2026-09": { expenses: [{ id: 9 }], incomes: [] },
+        "2026-11": { expenses: [{ id: 11 }], incomes: [] },
+      },
+    });
+  });
+
+  const current = await client.read("2026-10", "1");
+  const previous = await client.read("2026-09", "1");
+  const next = await client.read("2026-11", "1");
+
+  assert.equal(urls.length, 1);
+  assert.match(urls[0], /month=2026-10/);
+  assert.match(urls[0], /months=2026-09%2C2026-10%2C2026-11/);
+  assert.equal(current.payload.expenses[0].id, 10);
+  assert.equal(previous.payload.expenses[0].id, 9);
+  assert.equal(next.payload.expenses[0].id, 11);
 });
 
 test("a pending read cannot repopulate cache after a write", async () => {

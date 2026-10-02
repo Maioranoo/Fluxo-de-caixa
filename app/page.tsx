@@ -5,10 +5,9 @@ import { AppSidebar, MobileNavigation, PageHeader, type NavigationItem } from ".
 import { Bars, FinancialSummary, Metric } from "./components/finance-summary";
 import { Icon } from "./components/icons";
 import { BrandMark } from "./components/brand-mark";
-import { BrandLoading } from "./components/brand-loading";
 import { ExpenseTable, IncomeTable } from "./components/transactions";
 import { DialogFrame, Empty, IconButton, LoadingSkeleton, Panel, StatusNotice } from "./components/ui";
-import { adjacentMonths, createFinanceClient } from "./lib/finance-client";
+import { createFinanceClient } from "./lib/finance-client";
 import { adoptLoadedHousehold, chooseHousehold, formatMoney, groupExpenseCategories, groupTotals, type Category, type CategoryFilter, type CategoryKind, type Expense, type FinanceData, type Household, type HouseholdSelection, type Income, type Member, type Payment } from "./lib/finance-ui";
 import { MAX_CATEGORY_LENGTH, MAX_DESCRIPTION_LENGTH, MAX_EMAIL_LENGTH, MAX_INSTALLMENTS, MAX_MEMBERS, MAX_NAME_LENGTH, isValidDateInput, isValidMonthInput, normalizeCategoryName, normalizeDescription, normalizeImportedDescription, normalizeEmail, normalizeName, normalizePaymentName, parseInstallments, parseMoneyInput, validateMembers } from "./lib/validation";
 const ImportWorkspace = lazy(() => import("./components/imports/import-workspace").then(module => ({ default: module.ImportWorkspace })));
@@ -29,7 +28,6 @@ export default function Home() {
   const [householdSelection, setHouseholdSelection] = useState<HouseholdSelection>({ selectedId: "", requestedId: "" });
   const selectedHousehold = householdSelection.selectedId;
   const requestedHousehold = householdSelection.requestedId;
-  const [loading, setLoading] = useState(true);
   const [financeClient] = useState(() => createFinanceClient());
   const [loadedQuery, setLoadedQuery] = useState("");
   const [queryError, setQueryError] = useState("");
@@ -74,23 +72,18 @@ export default function Home() {
 
   useEffect(() => {
     let active = true;
-    let prefetchTimer: ReturnType<typeof setTimeout> | undefined;
     void financeClient.read(month, requestedHousehold).then(({ response, payload }) => {
       if (!active) return;
       setQueryError(response.ok ? "" : payload.error ?? "Não foi possível acessar os dados agora.");
       if (response.status === 401 || response.status === 403) setAccessError({ status: response.status, message: payload.error ?? "Esta conta ainda não tem acesso a uma carteira." });
       else if (payload.error) setNotice(payload.error); else { setAccessError(null); setData(payload); if (payload.household) setHouseholdSelection(current => adoptLoadedHousehold(current, String(payload.household!.id))); const person = payload.currentMember || payload.members[0]?.name || ""; setForm(current => ({ ...current, person: person || current.person, categoryId: "", paymentMethod: "" })); setIncomeForm(current => ({ ...current, person: person || current.person, categoryId: "" })); setExpenseCategory("all"); setExpensePayment("all"); setIncomeCategory("all"); setCategoryFilter(payload.household?.allowIncome ? "all" : "expense"); if (!payload.household?.allowIncome) { setCategoryKind("expense"); setEditingCategoryId(null); setTab(current => current === "entradas" ? "resumo" : current); } }
       setLoadedQuery(queryKey);
-      if (response.ok && !payload.error) prefetchTimer = setTimeout(() => {
-        for (const next of adjacentMonths(month)) void financeClient.read(next, requestedHousehold).catch(() => {});
-      }, 250);
-      setLoading(false);
     }).catch(error => {
       if (!active) return;
       if (error instanceof DOMException && error.name === "AbortError") { setRefreshKey(value => value + 1); return; }
-      setQueryError("Não foi possível acessar os dados agora."); setLoadedQuery(queryKey); setLoading(false);
+      setQueryError("Não foi possível acessar os dados agora."); setLoadedQuery(queryKey);
     });
-    return () => { active = false; clearTimeout(prefetchTimer); };
+    return () => { active = false; };
   }, [month, requestedHousehold, refreshKey, queryKey, financeClient]);
   useEffect(() => {
     if (!expenseEdit.id && !incomeEdit.id && !memberEdit.id) return;
@@ -345,8 +338,6 @@ export default function Home() {
     if (!isValidMonthInput(monthDraft)) return setNotice("Selecione um mês válido entre 2000 e 2200.");
     setMonth(monthDraft); setShowMonthPicker(false);
   }
-
-  if (loading) return <BrandLoading/>;
 
   if (accessError) return <main className="access-page"><section className="access-card"><span className="access-code">{accessError.status}</span><div className="access-mark"><BrandMark size={48}/></div><p>FINANÇAS DA FAMÍLIA</p><h1>{accessError.status === 401 ? "Login necessário" : "Acesso não autorizado"}</h1><p>{accessError.message}</p><small>Peça ao administrador para cadastrar nesta carteira o e-mail da conta usada para entrar.</small><button className="primary" type="button" onClick={()=>window.location.reload()}>Tentar novamente</button></section></main>;
 
