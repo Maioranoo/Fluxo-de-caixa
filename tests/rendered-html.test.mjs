@@ -222,3 +222,13 @@ test("exclusão de gastos usa modal próprio sem confirmação do navegador", as
   assert.match(source, /Excluindo…/);
   assert.match(source, /className="danger-button"/);
 });
+
+test("categorias permanecem acessíveis no mobile para todos os tipos de família", async () => {
+  const page = await readFile(new URL("../app/components/finance-dashboard.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  const mobileItems = page.match(/const mobilePrimaryItems:[\s\S]*?const openTab/)?.[0] ?? "";
+  assert.notEqual(mobileItems, "");
+  assert.equal((mobileItems.match(/id:"categorias"/g) ?? []).length, 2, "Categorias deve existir com e sem allowIncome");
+  assert.equal((mobileItems.match(/id:"entradas"/g) ?? []).length, 1, "Entradas deve existir apenas quando allowIncome estiver ativo");
+  assert.match(css, /\.mobile-bottom-nav\{[^}]*grid-template-columns:repeat\(auto-fit,minmax\(46px,1fr\)\)/);
+});
