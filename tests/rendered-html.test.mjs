@@ -157,6 +157,22 @@ test("novo gasto permite criar e selecionar uma categoria sem sair do formulári
   assert.match(page, /setShowExpenseCategoryForm\(false\)/);
 });
 
+test("novo gasto e edição aceitam sem categoria por padrão", async () => {
+  const page = await readFile(new URL("../app/components/finance-dashboard.tsx", import.meta.url), "utf8");
+  const api = await readFile(new URL("../app/api/finance/route.ts", import.meta.url), "utf8");
+  const newExpense = page.match(/tab === "novo"[\s\S]*?tab === "gastos"/)?.[0] ?? "";
+  assert.notEqual(newExpense, "");
+  assert.match(newExpense, /<option value="">Sem categoria<\/option>/);
+  assert.doesNotMatch(newExpense, /<select value=\{form\.categoryId\}[^>]*required/);
+  assert.match(page, /if \(form\.categoryId && !category\)/);
+  assert.match(page, /categoryId: category\?\.id \?\? null, category: category\?\.name \?\? null/);
+  assert.match(page, /if \(expenseEdit\.categoryId && !expenseCategories\.some/);
+  assert.doesNotMatch(page, /required=\{!expenseEdit\.imported\}><option value="">Sem categoria/);
+  assert.match(api, /if \(categoryId && !ownedCategory\) return invalid\("Selecione uma categoria de gasto válida\."\)/);
+  assert.match(api, /category: ownedCategory\?\.name \?\? null/);
+  assert.match(api, /if \(!ownedPayment && !imported\) return invalid\("Selecione um pagamento válido\."\)/);
+});
+
 test("impressão do relatório restaura a tabela de desktop depois das regras mobile", async () => {
   const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   const lastPrint = css.lastIndexOf("@media print");

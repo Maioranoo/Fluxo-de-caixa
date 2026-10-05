@@ -77,7 +77,8 @@ export async function POST(request: Request) {
     const installmentCount = amountCents ? (ownedPayment?.isCard ? parseInstallments(body.installments ?? "1", amountCents) : 1) : null;
     if (!amountCents) return invalid("Informe um valor entre R$ 0,01 e R$ 999.999.999,99, com no máximo dois centavos.");
     if (!description) return invalid("A descrição deve conter letras e ter no máximo 160 caracteres.");
-    if (!ownedCategory) return invalid("Selecione uma categoria de gasto válida.");
+    if (body.categoryId != null && body.categoryId !== "" && !categoryId) return invalid("Selecione uma categoria de gasto válida.");
+    if (categoryId && !ownedCategory) return invalid("Selecione uma categoria de gasto válida.");
     if (!ownedPayment) return invalid("Selecione uma forma de pagamento válida.");
     if (!installmentCount) return invalid("O número de parcelas deve ser um inteiro entre 1 e 60 e não pode superar o valor em centavos.");
     if (!isValidDateInput(body.occurredAt)) return invalid("Selecione uma data válida entre 2000 e 2200.");
@@ -85,10 +86,10 @@ export async function POST(request: Request) {
     if (!isValidDateInput(addMonths(body.occurredAt as string, installmentCount - 1))) return invalid("A última parcela precisa ficar dentro do limite de dezembro de 2200.");
     const baseAmount = Math.floor(amountCents / installmentCount), remainder = amountCents % installmentCount;
     const installmentGroupId = installmentCount > 1 ? crypto.randomUUID() : null;
-    const rows = Array.from({ length: installmentCount }, (_, index) => ({ householdId: context.householdId, installmentGroupId, amountCents: baseAmount + (index < remainder ? 1 : 0), description: installmentCount > 1 ? `${description} (${index + 1}/${installmentCount})` : description, categoryId, paymentMethod: body.paymentMethod as string, person: body.person as string, occurredAt: addMonths(body.occurredAt as string, index) }));
+    const rows = Array.from({ length: installmentCount }, (_, index) => ({ householdId: context.householdId, installmentGroupId, amountCents: baseAmount + (index < remainder ? 1 : 0), description: installmentCount > 1 ? `${description} (${index + 1}/${installmentCount})` : description, categoryId: ownedCategory?.id ?? null, paymentMethod: body.paymentMethod as string, person: body.person as string, occurredAt: addMonths(body.occurredAt as string, index) }));
     const created = await db.insert(expenses).values(rows).returning();
     logger.info("expense_created", { operation: "expense.create", outcome: "success", durationMs: performance.now() - started, count: created.length });
-    return Response.json({ expenses: created.map(item => ({ ...item, category: ownedCategory.name })), installments: installmentCount }, { status: 201 });
+    return Response.json({ expenses: created.map(item => ({ ...item, category: ownedCategory?.name ?? null })), installments: installmentCount }, { status: 201 });
   } catch (error) { return accessResponse(error, logger, started); }
 }
 
@@ -110,13 +111,13 @@ export async function PATCH(request: Request) {
       if (imported && body.description != null && body.description !== "" && !importedDescription) return invalid("Descrição inválida.");
       if (imported && body.referenceMonth != null && !isValidMonthInput(body.referenceMonth)) return invalid("Mês de referência inválido.");
       if (!id || !currentExpense) return invalid("Gasto inválido.");
-      if (imported && body.categoryId != null && body.categoryId !== "" && !ownedCategory) return invalid("Categoria inválida.");
+      if (body.categoryId != null && body.categoryId !== "" && (!categoryId || !ownedCategory)) return invalid("Categoria inválida.");
       if (imported && body.paymentMethod != null && body.paymentMethod !== "" && !ownedPayment) return invalid("Pagamento inválido.");
       if (body.occurredAt != null && body.occurredAt !== "" && !isValidDateInput(body.occurredAt)) return invalid("Data inválida.");
       if (body.person != null && body.person !== "" && (typeof body.person !== "string" || !allowedPeople.some(person => person.name === body.person))) return invalid("Integrante inválido.");
       if (!amountCents) return invalid("Informe um valor entre R$ 0,01 e R$ 999.999.999,99, com no máximo dois centavos.");
       if (!importedDescription && !imported) return invalid("A descrição deve conter letras e ter no máximo 160 caracteres.");
-      if ((!ownedCategory || !ownedPayment) && !imported) return invalid("Selecione categoria e pagamento válidos.");
+      if (!ownedPayment && !imported) return invalid("Selecione um pagamento válido.");
       if (body.occurredAt && !isValidDateInput(body.occurredAt)) return invalid("Selecione uma data válida entre 2000 e 2200.");
       if (!body.occurredAt && !imported) return invalid("Selecione uma data válida entre 2000 e 2200.");
       if (body.person && (typeof body.person !== "string" || !allowedPeople.some(person => person.name === body.person))) return invalid("Selecione um integrante válido.");
