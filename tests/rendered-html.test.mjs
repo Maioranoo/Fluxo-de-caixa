@@ -232,6 +232,17 @@ test("exclusão de gastos usa modal próprio sem confirmação do navegador", as
   assert.match(source, /className="danger-button"/);
 });
 
+test("exclusão de categorias usa modal próprio com erro local", async () => {
+  const source = await readFile(new URL("../app/components/finance-dashboard.tsx", import.meta.url), "utf8");
+  const removalFlow = source.match(/function removeCategory[\s\S]*?async function addPayment/)?.[0] ?? "";
+  assert.notEqual(removalFlow, "");
+  assert.doesNotMatch(removalFlow, /\bconfirm\s*\(/);
+  assert.match(source, /title="Excluir categoria\?"/);
+  assert.match(source, /categoryDeleteError&&<p className="delete-confirm-error" role="alert"/);
+  assert.match(source, /deletingCategory \? "Excluindo…" : "Excluir categoria"/);
+  assert.match(source, /setCategoryToDelete\(null\)/);
+});
+
 test("categorias permanecem acessíveis no mobile para todos os tipos de família", async () => {
   const page = await readFile(new URL("../app/components/finance-dashboard.tsx", import.meta.url), "utf8");
   const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
