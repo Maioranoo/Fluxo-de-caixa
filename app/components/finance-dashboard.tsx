@@ -53,6 +53,8 @@ export function FinanceDashboard({ initialFinance = null }: { initialFinance?: I
   const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
   const [editingCategoryName, setEditingCategoryName] = useState("");
   const [editingCategoryKind, setEditingCategoryKind] = useState<CategoryKind>("expense");
+  const [expenseCategoryName, setExpenseCategoryName] = useState("");
+  const [showExpenseCategoryForm, setShowExpenseCategoryForm] = useState(false);
   const [paymentForm, setPaymentForm] = useState({ name: "", isCard: false });
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [incomeForm, setIncomeForm] = useState({ amount: "", description: "", categoryId: "", person: "", occurredAt: today() });
@@ -164,6 +166,18 @@ export function FinanceDashboard({ initialFinance = null }: { initialFinance?: I
     if (!response.ok) return setNotice(result.error ?? "Não foi possível criar.");
     if (result.category) setData(current => ({ ...current, categories: [...current.categories, result.category!].sort((a,b) => a.name.localeCompare(b.name)) }));
     setCategoryName(""); setNotice(`Categoria de ${categoryKind === "income" ? "entrada" : "gasto"} criada.`);
+  }
+
+  async function addExpenseCategory(event: React.SyntheticEvent) {
+    event.preventDefault();
+    const name = normalizeCategoryName(expenseCategoryName);
+    if (!name) return setNotice("A categoria deve conter letras e ter no máximo 60 caracteres.");
+    const response = await financeClient.write("/api/finance", { method: "POST", headers: writeHeaders, body: JSON.stringify({ type: "category", name, kind: "expense" }) });
+    const result = await response.json() as { error?: string; category?: Category };
+    if (!response.ok || !result.category) return setNotice(result.error ?? "Não foi possível criar a categoria.");
+    setData(current => ({ ...current, categories: [...current.categories, result.category!].sort((a,b) => a.name.localeCompare(b.name)) }));
+    setForm(current => ({ ...current, categoryId: String(result.category!.id) }));
+    setExpenseCategoryName(""); setShowExpenseCategoryForm(false); setNotice("Categoria de gasto criada e selecionada.");
   }
 
   function removeExpense(id: number) {
@@ -385,7 +399,8 @@ export function FinanceDashboard({ initialFinance = null }: { initialFinance?: I
         {tab === "novo" && <section className="narrow"><Panel title="Registrar novo gasto" eyebrow="Novo lançamento"><form className="form" onSubmit={addExpense} aria-busy={savingExpense}>
           <label>Valor (R$)<input autoFocus inputMode="decimal" maxLength={16} placeholder="0,00" value={form.amount} onChange={e => setForm({...form, amount:e.target.value})} required /></label>
           <label className="wide">Onde foi gasto?<input maxLength={MAX_DESCRIPTION_LENGTH} placeholder="Ex.: Mercado Central" value={form.description} onChange={e => setForm({...form, description:e.target.value})} required /></label>
-          <label>Categoria<select value={form.categoryId} onChange={e => setForm({...form, categoryId:e.target.value})} required><option value="">Selecione uma categoria</option>{expenseCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+          <label>Categoria<div className="select-with-add"><select value={form.categoryId} onChange={e => setForm({...form, categoryId:e.target.value})} required><option value="">Selecione uma categoria</option>{expenseCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select><button className="add-inline" type="button" aria-label="Adicionar categoria de gasto" title="Adicionar categoria de gasto" onClick={()=>setShowExpenseCategoryForm(value=>!value)}>+</button></div></label>
+          {showExpenseCategoryForm && <div className="payment-popover wide"><b>Nova categoria de gasto</b><div><input autoFocus maxLength={MAX_CATEGORY_LENGTH} placeholder="Ex.: Mercado ou Saúde" value={expenseCategoryName} onChange={e=>setExpenseCategoryName(e.target.value)} required/><button className="primary" type="button" onClick={event=>void addExpenseCategory(event)}>Adicionar</button><button className="secondary" type="button" onClick={()=>{setExpenseCategoryName("");setShowExpenseCategoryForm(false)}}>Cancelar</button></div></div>}
           <label>Pagamento<div className="select-with-add"><select value={form.paymentMethod} onChange={e => setForm({...form, paymentMethod:e.target.value, installments:isCardPayment(e.target.value)?form.installments:"1"})} required><option value="">Selecione um pagamento</option>{payments.map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select><button className="add-inline" type="button" aria-label="Adicionar forma de pagamento" title="Adicionar forma de pagamento" onClick={()=>setShowPaymentForm(value=>!value)}>+</button></div></label>
           {showPaymentForm && <div className="payment-popover wide"><b>Nova forma de pagamento</b><div><input autoFocus maxLength={MAX_CATEGORY_LENGTH} placeholder="Ex.: Pix ou Cartão João" value={paymentForm.name} onChange={e=>setPaymentForm({...paymentForm,name:e.target.value})} required/><label className="check-label"><input type="checkbox" checked={paymentForm.isCard} onChange={e=>setPaymentForm({...paymentForm,isCard:e.target.checked})}/> Permite parcelamento</label><button className="primary" type="button" onClick={event=>void addPayment(event)}>Adicionar</button><button className="secondary" type="button" onClick={()=>setShowPaymentForm(false)}>Cancelar</button></div></div>}
           {isCardPayment(form.paymentMethod) && <label>Número de parcelas<input type="number" inputMode="numeric" min={1} max={MAX_INSTALLMENTS} step={1} value={form.installments} onChange={e=>setForm({...form,installments:e.target.value})} required/><small className="field-help">O valor total será dividido entre os meses.</small></label>}

@@ -148,6 +148,15 @@ test("privacidade, data local e salvamento protegido estão ativos", async () =>
   assert.match(security, /cross-site/);
 });
 
+test("novo gasto permite criar e selecionar uma categoria sem sair do formulário", async () => {
+  const page = await readFile(new URL("../app/components/finance-dashboard.tsx", import.meta.url), "utf8");
+  assert.match(page, /aria-label="Adicionar categoria de gasto"/);
+  assert.match(page, /Nova categoria de gasto/);
+  assert.match(page, /type: "category", name, kind: "expense"/);
+  assert.match(page, /categoryId: String\(result\.category!\.id\)/);
+  assert.match(page, /setShowExpenseCategoryForm\(false\)/);
+});
+
 test("impressão do relatório restaura a tabela de desktop depois das regras mobile", async () => {
   const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   const lastPrint = css.lastIndexOf("@media print");
