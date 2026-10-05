@@ -157,6 +157,15 @@ test("novo gasto permite criar e selecionar uma categoria sem sair do formulári
   assert.match(page, /setShowExpenseCategoryForm\(false\)/);
 });
 
+test("nova entrada permite criar e selecionar categoria de entrada no formulário", async () => {
+  const page = await readFile(new URL("../app/components/finance-dashboard.tsx", import.meta.url), "utf8");
+  assert.match(page, /aria-label="Adicionar categoria de entrada"/);
+  assert.match(page, /Nova categoria de entrada/);
+  assert.match(page, /type: "category", name, kind: "income"/);
+  assert.match(page, /setIncomeForm\(current => \(\{ \.\.\.current, categoryId: String\(result\.category!\.id\) \}\)\)/);
+  assert.match(page, /setShowIncomeCategoryForm\(false\)/);
+});
+
 test("novo gasto e edição aceitam sem categoria por padrão", async () => {
   const page = await readFile(new URL("../app/components/finance-dashboard.tsx", import.meta.url), "utf8");
   const api = await readFile(new URL("../app/api/finance/route.ts", import.meta.url), "utf8");
