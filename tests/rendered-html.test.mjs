@@ -285,3 +285,16 @@ test("rodapé mobile mantém cinco posições simétricas e reúne ações extra
   assert.match(page, />Relatório<\/button>/);
   assert.match(css, /\.mobile-bottom-nav\{[^}]*grid-template-columns:repeat\(5,1fr\)/);
 });
+
+test("entradas separa consulta do formulário de novo lançamento", async () => {
+  const page = await readFile(new URL("../app/components/finance-dashboard.tsx", import.meta.url), "utf8");
+  const launchForm = page.match(/\{tab === "nova-entrada"[\s\S]*?\{tab === "entradas"/)?.[0] ?? "";
+  const incomeHistory = page.match(/\{tab === "entradas"[\s\S]*?\{tab === "categorias"/)?.[0] ?? "";
+  assert.match(launchForm, /onSubmit=\{addIncome\}/);
+  assert.match(launchForm, /Salvar entrada/);
+  assert.doesNotMatch(incomeHistory, /onSubmit=\{addIncome\}/);
+  assert.match(incomeHistory, /Entradas do mês/);
+  assert.match(incomeHistory, /IncomeTable/);
+  assert.match(page, /onClick=\{\(\)=>openTab\("nova-entrada"\)\}>Nova entrada/);
+  assert.match(page, /tab === "novo" \|\| tab === "nova-entrada" \? "lancar"/);
+});
