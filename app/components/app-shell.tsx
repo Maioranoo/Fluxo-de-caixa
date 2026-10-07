@@ -9,7 +9,7 @@ export function AppSidebar({ items, tab, onNavigate, isAdmin, households, select
 }
 
 export function MobileNavigation({ items, tab, onNavigate }: { items: NavigationItem[]; tab: string; onNavigate: (id: string) => void }) {
-  return <nav className="mobile-bottom-nav" aria-label="Navegação principal">{items.map(item => <button key={item.id} type="button" className={`${tab === item.id ? "active" : ""} ${item.id === "novo" ? "main-action" : ""}`} aria-current={tab === item.id ? "page" : undefined} onClick={() => onNavigate(item.id)}><Icon name={item.icon}/><span>{item.label}</span></button>)}</nav>;
+  return <nav className="mobile-bottom-nav" aria-label="Navegação principal">{items.map(item => <button key={item.id} type="button" className={`${tab === item.id ? "active" : ""} ${item.id === "novo" || item.id === "lancar" ? "main-action" : ""}`} aria-current={tab === item.id ? "page" : undefined} onClick={() => onNavigate(item.id)}><Icon name={item.icon}/><span>{item.label}</span></button>)}</nav>;
 }
 
 export function PageHeader({ eyebrow, title, monthLabel, onOpenMonth }: { eyebrow: string; title: string; monthLabel: string; onOpenMonth: () => void }) {

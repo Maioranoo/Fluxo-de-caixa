@@ -268,12 +268,20 @@ test("exclusão de categorias usa modal próprio com erro local", async () => {
   assert.match(source, /setCategoryToDelete\(null\)/);
 });
 
-test("categorias permanecem acessíveis no mobile para todos os tipos de família", async () => {
+test("rodapé mobile mantém cinco posições simétricas e reúne ações extras", async () => {
   const page = await readFile(new URL("../app/components/finance-dashboard.tsx", import.meta.url), "utf8");
   const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   const mobileItems = page.match(/const mobilePrimaryItems:[\s\S]*?const openTab/)?.[0] ?? "";
   assert.notEqual(mobileItems, "");
-  assert.equal((mobileItems.match(/id:"categorias"/g) ?? []).length, 2, "Categorias deve existir com e sem allowIncome");
+  assert.equal((mobileItems.match(/id:"lancar"/g) ?? []).length, 1, "Lançar deve reunir nova entrada e nova saída");
+  assert.equal((mobileItems.match(/id:"mais"/g) ?? []).length, 1, "Mais deve reunir categorias e relatório");
+  assert.equal((mobileItems.match(/id:"categorias"/g) ?? []).length, 1, "Famílias somente saída mantêm Categorias diretamente no rodapé");
   assert.equal((mobileItems.match(/id:"entradas"/g) ?? []).length, 1, "Entradas deve existir apenas quando allowIncome estiver ativo");
-  assert.match(css, /\.mobile-bottom-nav\{[^}]*grid-template-columns:repeat\(auto-fit,minmax\(46px,1fr\)\)/);
+  assert.match(page, /title="O que deseja lançar\?"/);
+  assert.match(page, />Nova saída<\/button>/);
+  assert.match(page, />Nova entrada<\/button>/);
+  assert.match(page, /title="Mais opções"/);
+  assert.match(page, />Categorias<\/button>/);
+  assert.match(page, />Relatório<\/button>/);
+  assert.match(css, /\.mobile-bottom-nav\{[^}]*grid-template-columns:repeat\(5,1fr\)/);
 });
