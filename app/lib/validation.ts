@@ -26,7 +26,7 @@ function normalizeText(value: unknown, maximumLength: number) {
 
 export const normalizeCategoryName = (value: unknown) => normalizeText(value, MAX_CATEGORY_LENGTH);
 export const normalizePaymentName = (value: unknown) => normalizeText(value, MAX_CATEGORY_LENGTH);
-export const normalizeDescription = (value: unknown) => normalizeText(value, MAX_DESCRIPTION_LENGTH);
+export const normalizeDescription = (value: unknown) => normalizePlainText(value, MAX_DESCRIPTION_LENGTH);
 export const normalizeImportedDescription = (value: unknown) => normalizePlainText(value, MAX_DESCRIPTION_LENGTH);
 export const normalizeName = (value: unknown) => normalizeText(value, MAX_NAME_LENGTH);
 

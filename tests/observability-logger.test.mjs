@@ -30,6 +30,24 @@ test("logger drops forbidden and non-allowlisted data", () => {
   for (const secret of ["Bearer", "session=", "person@example.com", "Farmácia", "52381", "householdId"]) assert.equal(output.includes(secret), false, secret);
 });
 
+test("logger removes SQL query parameters from database errors", () => {
+  const lines = [];
+  const logger = createLogger({}, { level: "debug", sink: { log: line => lines.push(line), warn: line => lines.push(line), error: line => lines.push(line) } });
+  const privateData = "Compra particular 987,65";
+  logger.error("database_operation_failed", {
+    operation: "database.expense_insert",
+    errorName: "DrizzleQueryError",
+    errorMessage: `Failed query: insert into expenses values (?, ?)\nparams: ${privateData},Pessoa privada`,
+    errorStack: `DrizzleQueryError: Failed query: insert into expenses values (?, ?)\nparams: ${privateData},Pessoa privada\n    at execute (worker.js:10:2)`,
+  });
+
+  const output = lines.join("");
+  assert.equal(output.includes(privateData), false);
+  assert.equal(output.includes("Pessoa privada"), false);
+  assert.equal(output.includes("insert into expenses"), false);
+  assert.match(output, /\[REDACTED_DATABASE_ERROR\]/);
+});
+
 test("every logger boundary is fail-open", () => {
   const throwingSink = { log() { throw new Error("console failed"); }, warn() { throw new Error("console failed"); }, error() { throw new Error("console failed"); } };
   const logger = createLogger({}, { level: "debug", sink: throwingSink, now: () => { throw new Error("clock failed"); } });

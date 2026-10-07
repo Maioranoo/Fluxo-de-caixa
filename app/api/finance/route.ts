@@ -6,6 +6,7 @@ import { isCategoryKind, isValidDateInput, isValidMonthInput, normalizeCategoryN
 import { assertSameSite, readJsonObject } from "../security";
 import { normalizeMerchant } from "../../lib/imports/fingerprint.ts";
 import { expenseDeletionFilter } from "../../lib/server/expense-deletion.ts";
+import { chunkD1InsertValues } from "../../lib/server/d1-insert-batching.ts";
 import { InvalidFinanceMonthsError, loadFinanceData } from "../../lib/server/finance-data.ts";
 import { measureOperation, markErrorObserved } from "../../lib/server/observability/measure.ts";
 import { observabilityForRequest } from "../../lib/server/observability/runtime.ts";
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
       const [ownedCategory] = categoryId ? await db.select({ id: categories.id, name: categories.name }).from(categories).where(and(eq(categories.id, categoryId), eq(categories.householdId, context.householdId), eq(categories.kind, "income"))).limit(1) : [];
       const allowedPeople = await db.select({ name: householdMembers.displayName }).from(householdMembers).where(eq(householdMembers.householdId, context.householdId));
       if (!amountCents) return invalid("Informe um valor entre R$ 0,01 e R$ 999.999.999,99, com no máximo dois centavos.");
-      if (!description) return invalid("A descrição deve conter letras e ter no máximo 160 caracteres.");
+      if (!description) return invalid("A descrição deve ter entre 1 e 160 caracteres.");
       if (!ownedCategory) return invalid("Selecione uma categoria de entrada válida.");
       if (!isValidDateInput(body.occurredAt)) return invalid("Selecione uma data válida entre 2000 e 2200.");
       if (typeof body.person !== "string" || !allowedPeople.some(person => person.name === body.person)) return invalid("Selecione um integrante válido.");
@@ -76,7 +77,7 @@ export async function POST(request: Request) {
     ]);
     const installmentCount = amountCents ? (ownedPayment?.isCard ? parseInstallments(body.installments ?? "1", amountCents) : 1) : null;
     if (!amountCents) return invalid("Informe um valor entre R$ 0,01 e R$ 999.999.999,99, com no máximo dois centavos.");
-    if (!description) return invalid("A descrição deve conter letras e ter no máximo 160 caracteres.");
+    if (!description) return invalid("A descrição deve ter entre 1 e 160 caracteres.");
     if (body.categoryId != null && body.categoryId !== "" && !categoryId) return invalid("Selecione uma categoria de gasto válida.");
     if (categoryId && !ownedCategory) return invalid("Selecione uma categoria de gasto válida.");
     if (!ownedPayment) return invalid("Selecione uma forma de pagamento válida.");
@@ -87,7 +88,8 @@ export async function POST(request: Request) {
     const baseAmount = Math.floor(amountCents / installmentCount), remainder = amountCents % installmentCount;
     const installmentGroupId = installmentCount > 1 ? crypto.randomUUID() : null;
     const rows = Array.from({ length: installmentCount }, (_, index) => ({ householdId: context.householdId, installmentGroupId, amountCents: baseAmount + (index < remainder ? 1 : 0), description: installmentCount > 1 ? `${description} (${index + 1}/${installmentCount})` : description, categoryId: ownedCategory?.id ?? null, paymentMethod: body.paymentMethod as string, person: body.person as string, occurredAt: addMonths(body.occurredAt as string, index) }));
-    const created = await db.insert(expenses).values(rows).returning();
+    const insertStatements = chunkD1InsertValues(rows, 8).map(chunk => db.insert(expenses).values(chunk).returning());
+    const created = (await db.batch(insertStatements as unknown as Parameters<typeof db.batch>[0])).flat();
     logger.info("expense_created", { operation: "expense.create", outcome: "success", durationMs: performance.now() - started, count: created.length });
     return Response.json({ expenses: created.map(item => ({ ...item, category: ownedCategory?.name ?? null })), installments: installmentCount }, { status: 201 });
   } catch (error) { return accessResponse(error, logger, started); }
@@ -116,7 +118,7 @@ export async function PATCH(request: Request) {
       if (body.occurredAt != null && body.occurredAt !== "" && !isValidDateInput(body.occurredAt)) return invalid("Data inválida.");
       if (body.person != null && body.person !== "" && (typeof body.person !== "string" || !allowedPeople.some(person => person.name === body.person))) return invalid("Integrante inválido.");
       if (!amountCents) return invalid("Informe um valor entre R$ 0,01 e R$ 999.999.999,99, com no máximo dois centavos.");
-      if (!importedDescription && !imported) return invalid("A descrição deve conter letras e ter no máximo 160 caracteres.");
+      if (!importedDescription && !imported) return invalid("A descrição deve ter entre 1 e 160 caracteres.");
       if (!ownedPayment && !imported) return invalid("Selecione um pagamento válido.");
       if (body.occurredAt && !isValidDateInput(body.occurredAt)) return invalid("Selecione uma data válida entre 2000 e 2200.");
       if (!body.occurredAt && !imported) return invalid("Selecione uma data válida entre 2000 e 2200.");
@@ -138,7 +140,7 @@ export async function PATCH(request: Request) {
       if (!household?.allowIncome) return Response.json({ error: "Entradas não estão habilitadas para esta família." }, { status: 403 });
       if (!id) return invalid("Entrada inválida.");
       if (!amountCents) return invalid("Informe um valor entre R$ 0,01 e R$ 999.999.999,99, com no máximo dois centavos.");
-      if (!description) return invalid("A descrição deve conter letras e ter no máximo 160 caracteres.");
+      if (!description) return invalid("A descrição deve ter entre 1 e 160 caracteres.");
       if (!ownedCategory) return invalid("Selecione uma categoria de entrada válida.");
       if (!isValidDateInput(body.occurredAt)) return invalid("Selecione uma data válida entre 2000 e 2200.");
       if (typeof body.person !== "string" || !allowedPeople.some(person => person.name === body.person)) return invalid("Selecione um integrante válido.");

@@ -85,7 +85,12 @@ function pickContext(context: LogContext) {
 function safeValue(value: unknown, key: string): string | number | undefined {
   if (typeof value === "number") return Number.isFinite(value) ? Math.round(value * 10) / 10 : undefined;
   if (typeof value !== "string") return undefined;
+  if ((key === "errorMessage" || key === "errorStack") && isDatabaseErrorText(value)) return "[REDACTED_DATABASE_ERROR]";
   return safeString(value, key === "errorStack" ? 4000 : 240);
+}
+
+function isDatabaseErrorText(value: string) {
+  return /(?:DrizzleQueryError|Failed query:|\bparams:|D1_ERROR|SQLITE_[A-Z_]+)/i.test(value);
 }
 
 function safeString(value: string, limit: number) {

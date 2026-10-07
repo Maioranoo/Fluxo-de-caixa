@@ -142,7 +142,7 @@ export function FinanceDashboard({ initialFinance = null }: { initialFinance?: I
     if (savingExpense) return;
     const category = expenseCategories.find(item => String(item.id) === form.categoryId), payment = data.payments.find(item => item.key === form.paymentMethod), amountCents = parseMoneyInput(form.amount), description = normalizeDescription(form.description);
     if (!amountCents) return setNotice("Informe um valor entre R$ 0,01 e R$ 999.999.999,99, com no máximo duas casas decimais.");
-    if (!description) return setNotice("A descrição deve conter letras e ter no máximo 160 caracteres.");
+    if (!description) return setNotice("A descrição deve ter entre 1 e 160 caracteres.");
     if (form.categoryId && !category) return setNotice("Selecione uma categoria de gasto válida.");
     if (!payment) return setNotice("Selecione uma forma de pagamento válida.");
     if (!data.members.some(member => member.name === form.person)) return setNotice("Selecione um integrante válido.");
@@ -290,7 +290,7 @@ export function FinanceDashboard({ initialFinance = null }: { initialFinance?: I
     if (savingIncome) return;
     const amountCents = parseMoneyInput(incomeForm.amount), description = normalizeDescription(incomeForm.description), category = incomeCategories.find(item => String(item.id) === incomeForm.categoryId);
     if (!amountCents) return setNotice("Informe um valor entre R$ 0,01 e R$ 999.999.999,99, com no máximo duas casas decimais.");
-    if (!description) return setNotice("A descrição deve conter letras e ter no máximo 160 caracteres.");
+    if (!description) return setNotice("A descrição deve ter entre 1 e 160 caracteres.");
     if (!category) return setNotice("Selecione uma categoria de entrada válida.");
     if (!data.members.some(member => member.name === incomeForm.person)) return setNotice("Selecione um integrante válido.");
     if (!isValidDateInput(incomeForm.occurredAt)) return setNotice("Selecione uma data válida entre 2000 e 2200.");
@@ -336,7 +336,7 @@ export function FinanceDashboard({ initialFinance = null }: { initialFinance?: I
     const amountCents = parseMoneyInput(expenseEdit.amount), description = expenseEdit.imported ? normalizeImportedDescription(expenseEdit.description) : normalizeDescription(expenseEdit.description);
     if (expenseEdit.imported && expenseEdit.description.trim() && !description) return setNotice("A descrição deve ter no máximo 160 caracteres e não conter caracteres de controle.");
     if (!amountCents) return setNotice("Informe um valor entre R$ 0,01 e R$ 999.999.999,99, com no máximo duas casas decimais.");
-    if (!expenseEdit.imported && !description) return setNotice("A descrição deve conter letras e ter no máximo 160 caracteres.");
+    if (!expenseEdit.imported && !description) return setNotice("A descrição deve ter entre 1 e 160 caracteres.");
     if (expenseEdit.categoryId && !expenseCategories.some(category => String(category.id) === expenseEdit.categoryId)) return setNotice("Selecione uma categoria de gasto válida.");
     if (!expenseEdit.imported && !data.payments.some(payment => payment.key === expenseEdit.paymentMethod)) return setNotice("Selecione uma forma de pagamento válida.");
     if (!expenseEdit.imported && !data.members.some(member => member.name === expenseEdit.person)) return setNotice("Selecione um integrante válido.");
@@ -358,7 +358,7 @@ export function FinanceDashboard({ initialFinance = null }: { initialFinance?: I
     event.preventDefault();
     const amountCents = parseMoneyInput(incomeEdit.amount), description = normalizeDescription(incomeEdit.description);
     if (!amountCents) return setNotice("Informe um valor entre R$ 0,01 e R$ 999.999.999,99, com no máximo duas casas decimais.");
-    if (!description) return setNotice("A descrição deve conter letras e ter no máximo 160 caracteres.");
+    if (!description) return setNotice("A descrição deve ter entre 1 e 160 caracteres.");
     if (!incomeCategories.some(category => String(category.id) === incomeEdit.categoryId)) return setNotice("Selecione uma categoria de entrada válida.");
     if (!data.members.some(member => member.name === incomeEdit.person)) return setNotice("Selecione um integrante válido.");
     if (!isValidDateInput(incomeEdit.occurredAt)) return setNotice("Selecione uma data válida entre 2000 e 2200.");

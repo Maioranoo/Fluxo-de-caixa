@@ -37,7 +37,7 @@ test("valida textos com letra e limites de tamanho", () => {
   assert.equal(normalizePaymentName("Cartão João"), "Cartão João");
   assert.equal(normalizePaymentName("999"), null);
   assert.equal(normalizeDescription("Salário setembro"), "Salário setembro");
-  assert.equal(normalizeDescription("999"), null);
+  assert.equal(normalizeDescription(" 999 "), "999");
   assert.equal(normalizeDescription("A".repeat(161)), null);
   assert.equal(normalizeName(" José da Silva "), "José da Silva");
   assert.equal(normalizeName("123"), null);
