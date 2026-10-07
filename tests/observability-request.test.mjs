@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { createRequestContext, requestWithContext, responseWithRequestId } from "../app/lib/server/observability/request-context.ts";
+import { createRequestContext, requestWithContext, responseWithRequestId, responseWithSecurityHeaders } from "../app/lib/server/observability/request-context.ts";
 
 for (const method of ["POST", "PATCH", "DELETE"]) test(`${method} correlation preserves request body, method and headers`, async () => {
   const bytes = new TextEncoder().encode(`payload-${method}-á`);
@@ -52,11 +52,31 @@ test("streaming response is neither read nor buffered by correlation", async () 
   assert.equal(pulls, 2);
 });
 
+test("authenticated HTML receives private cache and anti-framing headers without consuming its stream", async () => {
+  let pulls = 0;
+  const original = new Response(new ReadableStream({ pull(controller) { pulls++; controller.enqueue(new TextEncoder().encode("html")); controller.close(); } }), { headers: { "content-type": "text/html; charset=utf-8", "x-existing": "yes" } });
+  const secured = responseWithSecurityHeaders(original, "req_html", { privateResponse: true, protectFromFraming: true });
+  assert.equal(pulls, 0);
+  assert.equal(original.bodyUsed, false);
+  assert.equal(secured.headers.get("cache-control"), "private, no-store, max-age=0");
+  assert.equal(secured.headers.get("pragma"), "no-cache");
+  assert.equal(secured.headers.get("content-security-policy"), "frame-ancestors 'none'");
+  assert.equal(secured.headers.get("x-frame-options"), "DENY");
+  assert.equal(secured.headers.get("x-existing"), "yes");
+  assert.equal(await secured.text(), "html");
+});
+
+test("private API response receives no-store without an HTML framing policy", () => {
+  const secured = responseWithSecurityHeaders(Response.json({ ok: true }), "req_api", { privateResponse: true });
+  assert.equal(secured.headers.get("cache-control"), "private, no-store, max-age=0");
+  assert.equal(secured.headers.get("x-frame-options"), null);
+});
+
 test("Worker uses contextual request and does not inspect bodies", async () => {
   const source = await readFile(new URL("../worker/index.ts", import.meta.url), "utf8");
   assert.match(source, /createRequestContext/);
   assert.match(source, /requestWithContext/);
-  assert.match(source, /responseWithRequestId/);
+  assert.match(source, /responseWithSecurityHeaders/);
   assert.match(source, /request_completed/);
   assert.match(source, /slow_request/);
   assert.match(source, /markErrorObserved/);

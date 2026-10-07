@@ -1,9 +1,9 @@
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { AccessError, requireHousehold } from "../../../../db/tenancy";
 import { categories, categoryRules, expenses, importBatches } from "../../../../db/schema";
 import { assertSameSite, readJsonObject } from "../../security";
-import { classifyExpense } from "../../../lib/imports/classifier.ts";
+import { createExpenseClassifier, type CategorySuggestion } from "../../../lib/imports/classifier.ts";
 import { fingerprintImportRow, normalizeMerchant } from "../../../lib/imports/fingerprint.ts";
 import { MAX_IMPORT_BYTES, validatePreviewPayload } from "../../../lib/imports/validation.ts";
 import type { ImportRowWarning, PreviewImportRow } from "../../../lib/imports/types.ts";
@@ -20,17 +20,18 @@ export async function POST(request: Request) {
     const db = getDb();
     const [categoryRows, learnedRows, historyRows, fingerprintRows, matchingFiles] = await measureOperation(logger, { operation: "database.import_preview", kind: "database", databaseBaselineLogging: config.databaseBaselineLogging, slowThresholdMs: config.slowDatabaseQueryMs }, () => Promise.all([
       db.select({ id: categories.id, name: categories.name }).from(categories).where(and(eq(categories.householdId, context.householdId), eq(categories.kind, "expense"))),
-      db.select({ pattern: categoryRules.pattern, categoryId: categoryRules.categoryId }).from(categoryRules).where(eq(categoryRules.householdId, context.householdId)),
-      db.select({ merchant: expenses.description, categoryId: expenses.categoryId }).from(expenses).where(and(eq(expenses.householdId, context.householdId), isNotNull(expenses.description), isNotNull(expenses.categoryId))),
+      db.select({ pattern: categoryRules.pattern, categoryId: categoryRules.categoryId }).from(categoryRules).where(eq(categoryRules.householdId, context.householdId)).orderBy(desc(categoryRules.updatedAt)).limit(MAX_CLASSIFICATION_RULES),
+      db.select({ merchant: expenses.description, categoryId: expenses.categoryId }).from(expenses).where(and(eq(expenses.householdId, context.householdId), isNotNull(expenses.description), isNotNull(expenses.categoryId))).orderBy(desc(expenses.id)).limit(MAX_CLASSIFICATION_HISTORY),
       db.select({ fingerprint: expenses.importFingerprint }).from(expenses).where(and(eq(expenses.householdId, context.householdId), eq(expenses.referenceMonth, payload.value.referenceMonth), isNotNull(expenses.importFingerprint))),
       db.select({ id: importBatches.id }).from(importBatches).where(and(eq(importBatches.householdId, context.householdId), eq(importBatches.fileHash, payload.value.fileHash))).limit(1),
     ]));
     const existingFingerprints = new Set(fingerprintRows.map(row => row.fingerprint).filter((value): value is string => Boolean(value)));
-    const prepared = await measureOperation(logger, { operation: "import.preview.classify", kind: "application", completedEvent: "import_classification_completed", fields: { count: payload.value.rows.length, mode: payload.value.mode } }, () => Promise.all(payload.value.rows.map(async row => prepareRow(row, payload.value.mode, payload.value.referenceMonth, context.householdId, {
+    const classify = createExpenseClassifier({
       categories: categoryRows,
       learned: learnedRows,
       history: historyRows.filter((item): item is { merchant: string; categoryId: number } => Boolean(item.merchant) && Boolean(item.categoryId)),
-    }))));
+    });
+    const prepared = await measureOperation(logger, { operation: "import.preview.classify", kind: "application", completedEvent: "import_classification_completed", fields: { count: payload.value.rows.length, mode: payload.value.mode } }, () => Promise.all(payload.value.rows.map(async row => prepareRow(row, payload.value.mode, payload.value.referenceMonth, context.householdId, classify))));
     const counts = new Map<string, number>();
     prepared.forEach(row => { if (row.fingerprint) counts.set(row.fingerprint, (counts.get(row.fingerprint) ?? 0) + 1); });
     const rows = prepared.map(row => {
@@ -45,11 +46,11 @@ export async function POST(request: Request) {
   }
 }
 
-async function prepareRow(row: PreviewImportRow, mode: "full" | "minimal", referenceMonth: string, householdId: number, classificationContext: Parameters<typeof classifyExpense>[1]): Promise<PreviewImportRow> {
+async function prepareRow(row: PreviewImportRow, mode: "full" | "minimal", referenceMonth: string, householdId: number, classify: (input: { description: string | null }) => CategorySuggestion): Promise<PreviewImportRow> {
   const amountCents = row.amountCents;
   const description = row.description?.trim() || null;
   const occurredAt = mode === "minimal" ? null : row.occurredAt;
-  const suggestion = mode === "full" && !row.categoryReviewed && !row.newCategoryName ? classifyExpense({ description }, classificationContext) : { categoryId: null, categoryName: null, source: null, confidence: 0 };
+  const suggestion = mode === "full" && !row.categoryReviewed && !row.newCategoryName ? classify({ description }) : { categoryId: null, categoryName: null, source: null, confidence: 0 };
   const warnings: ImportRowWarning[] = [];
   if (!amountCents) warnings.push("invalid_amount");
   if (amountCents && (amountCents < 0 || /\b(?:estorno|credito|pagamento(?: da)? fatura|pagamento recebido)\b/i.test(normalizeMerchant(description)))) warnings.push("excluded_credit");
@@ -72,6 +73,9 @@ async function prepareRow(row: PreviewImportRow, mode: "full" | "minimal", refer
     fingerprint,
   };
 }
+
+export const MAX_CLASSIFICATION_HISTORY = 1000;
+export const MAX_CLASSIFICATION_RULES = 1000;
 
 function uniqueWarnings(warnings: ImportRowWarning[]) {
   return [...new Set(warnings)];

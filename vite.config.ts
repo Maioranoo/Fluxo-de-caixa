@@ -55,7 +55,7 @@ export default defineConfig(async ({ command, mode }) => {
       sites(),
       cloudflare({
         viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
-        config: { ...localBindingConfig, vars: { LOCAL_ADMIN_ENABLED: command === "serve" ? "true" : "false" } },
+        config: { ...localBindingConfig, vars: { LOCAL_ADMIN_ENABLED: command === "serve" ? "true" : "false", NODE_ENV: command === "serve" ? "development" : "production" } },
       }),
     ],
   };

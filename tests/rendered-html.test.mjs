@@ -51,18 +51,18 @@ test("painel financeiro possui os fluxos essenciais", async () => {
 test("banco separa famílias e possui índices para as consultas principais", async () => {
   const schema = await readFile(new URL("../db/schema.ts", import.meta.url), "utf8");
   const tenancy = await readFile(new URL("../db/tenancy.ts", import.meta.url), "utf8");
+  const trustedIdentity = await readFile(new URL("../app/lib/server/trusted-identity.ts", import.meta.url), "utf8");
   assert.match(schema, /households/);
   assert.match(schema, /householdMembers/);
   assert.match(schema, /paymentMethods/);
   assert.match(schema, /idx_expenses_household_date/);
   assert.match(schema, /idx_expenses_household_category_date/);
   assert.match(schema, /idx_expenses_household_payment_date/);
-  assert.match(tenancy, /oai-authenticated-user-id/);
-  assert.match(tenancy, /oai-authenticated-user-email/);
-  assert.match(tenancy, /if \(!email \|\| !userId/);
+  assert.match(trustedIdentity, /oai-authenticated-user-id/);
+  assert.match(trustedIdentity, /oai-authenticated-user-email/);
+  assert.match(trustedIdentity, /if \(!email \|\| !userId/);
   assert.match(tenancy, /userId \? or/);
-  assert.doesNotMatch(tenancy, /if \(!email \|\| !userId\)/);
-  assert.match(tenancy, /LOCAL_ADMIN_ENABLED === "true"/);
+  assert.match(trustedIdentity, /LOCAL_ADMIN_ENABLED === "true"/);
   assert.match(tenancy, /canAccessHousehold\(isAdmin, member\.householdId, requestedId\)/);
   assert.match(tenancy, /if \(!canAccessHousehold/);
 });

@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
 import * as rateLimit from "../app/lib/server/rate-limit.ts";
 
-const { enforceRateLimit, requestPolicies, clientIdentity, cleanupRateLimits } = rateLimit;
+const { enforceRateLimit, requestPolicies, requestRateLimitChecks, clientIdentity, cleanupRateLimits } = rateLimit;
 
 function store() {
   const sqlite = new DatabaseSync(":memory:");
@@ -99,10 +99,15 @@ test("limites de IP e usuário autenticado são aplicados em uma única operaç�
   } finally { sqlite.close(); }
 });
 
-test("HTML não consulta o banco e APIs agrupam limites de IP e usuário", () => {
-  assert.equal(typeof rateLimit.requestRateLimitChecks, "function");
-  assert.deepEqual(rateLimit.requestRateLimitChecks(new Request("https://app.example/")), []);
-  const checks = rateLimit.requestRateLimitChecks(new Request("https://app.example/api/finance", {
+test("rotas dinâmicas recebem limite geral e APIs agrupam limites de IP e usuário", () => {
+  assert.deepEqual(requestRateLimitChecks(new Request("https://app.example/")), [{ identity: "ip:unknown", policies: [{ scope: "all", limit: 300 }] }]);
+  assert.deepEqual(requestRateLimitChecks(new Request("https://app.example/resumo")), [{ identity: "ip:unknown", policies: [{ scope: "all", limit: 300 }] }]);
+  assert.deepEqual(requestRateLimitChecks(new Request("https://app.example/favicon.svg")), []);
+  assert.deepEqual(requestRateLimitChecks(new Request("https://app.example/_next/static/app.js")), []);
+  assert.equal(requestRateLimitChecks(new Request("https://app.example/api/export.json")).length, 1);
+  const image = requestRateLimitChecks(new Request("https://app.example/_vinext/image", { headers: { "cf-connecting-ip": "192.0.2.10" } }));
+  assert.deepEqual(image[0].policies.map(policy => policy.scope), ["all", "image"]);
+  const checks = requestRateLimitChecks(new Request("https://app.example/api/finance", {
     headers: { "cf-connecting-ip": "192.0.2.10", "oai-authenticated-user-id": "user-123" },
   }));
   assert.equal(checks.length, 2);

@@ -32,6 +32,9 @@ test("prévia é protegida, isolada e não grava dados", async () => {
   assert.match(route, /date_mismatch/);
   assert.match(route, /excluded_credit/);
   assert.match(route, /suggestion\.source === "built-in"/);
+  assert.match(route, /MAX_CLASSIFICATION_HISTORY/);
+  assert.match(route, /MAX_CLASSIFICATION_RULES/);
+  assert.match(route, /createExpenseClassifier/);
 });
 
 test("confirmação e exclusão de lote revalidam família e usam batch", async () => {

@@ -5,8 +5,9 @@ import { AccessError } from "../app/lib/server/http-security.ts";
 import { cleanupRateLimits, enforceRateLimits, requestRateLimitChecks } from "../app/lib/server/rate-limit.ts";
 import { getObservabilityConfig } from "../app/lib/server/observability/config.ts";
 import { createLogger } from "../app/lib/server/observability/logger.ts";
-import { createRequestContext, requestWithContext, responseWithRequestId } from "../app/lib/server/observability/request-context.ts";
+import { createRequestContext, requestWithContext, responseWithSecurityHeaders } from "../app/lib/server/observability/request-context.ts";
 import { markErrorObserved } from "../app/lib/server/observability/measure.ts";
+import { assertSafeImageRequest } from "../app/lib/server/image-security.ts";
 
 interface Env {
   ASSETS: Fetcher;
@@ -24,6 +25,7 @@ interface Env {
   SLOW_AUTH_MS?: string;
   SLOW_DATABASE_QUERY_MS?: string;
   DATABASE_BASELINE_LOGGING?: string;
+  SITE_HOST?: string;
 }
 
 interface ExecutionContext {
@@ -51,7 +53,11 @@ const worker = {
         logger.info("request_completed", { status: response.status, durationMs });
         if (durationMs > config.slowRequestMs) logger.warn("slow_request", { status: response.status, durationMs, thresholdMs: config.slowRequestMs });
       }
-      return responseWithRequestId(response, context.requestId);
+      const contentType = response.headers.get("content-type") || "";
+      return responseWithSecurityHeaders(response, context.requestId, {
+        privateResponse: url.pathname === "/" || url.pathname === "/api" || url.pathname.startsWith("/api/"),
+        protectFromFraming: contentType.toLowerCase().includes("text/html"),
+      });
     };
     logger.debug("request_started");
 
@@ -65,6 +71,8 @@ const worker = {
     if (Math.random() < 0.01) ctx.waitUntil(cleanupRateLimits(env.DB, Date.now(), logger).catch(() => {}));
 
     if (url.pathname === "/_vinext/image") {
+      try { assertSafeImageRequest(contextualRequest); }
+      catch (error) { if (error instanceof AccessError) return report(Response.json({ error: error.message }, { status: error.status, headers: error.headers })); throw error; }
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
       return report(await handleImageOptimization(contextualRequest, {
         fetchAsset: (path) => env.ASSETS.fetch(new Request(new URL(path, request.url))),

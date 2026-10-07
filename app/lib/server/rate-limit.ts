@@ -26,6 +26,7 @@ export function requestPolicies(request: Request): RatePolicy[] {
     if (!["GET", "HEAD", "OPTIONS"].includes(request.method)) policies.push({ scope: "write", limit: 30 });
     if ((path === "/api/imports" || path.startsWith("/api/imports/")) && request.method === "POST") policies.push({ scope: "import", limit: 10 });
   }
+  if (path === "/_vinext/image") policies.push({ scope: "image", limit: 60 });
   return policies;
 }
 
@@ -76,12 +77,18 @@ export async function enforceRateLimits(db: RateLimitDatabase, checks: RateLimit
 
 export function requestRateLimitChecks(request: Request): RateLimitCheck[] {
   const path = new URL(request.url).pathname;
-  if (path !== "/api" && !path.startsWith("/api/")) return [];
+  const isApi = path === "/api" || path.startsWith("/api/");
+  if (!isApi && isStaticAssetPath(path)) return [];
   const policies = requestPolicies(request);
   const checks: RateLimitCheck[] = [{ identity: clientIdentity(request), policies }];
   const userId = request.headers.get("oai-authenticated-user-id")?.trim();
   if (userId) checks.push({ identity: `user:${userId}`, policies });
   return checks;
+}
+
+function isStaticAssetPath(path: string) {
+  if (path === "/_vinext/image") return false;
+  return path.startsWith("/_next/static/") || path.startsWith("/_vinext/static/") || /\.[a-z0-9]{2,8}$/i.test(path);
 }
 
 export async function cleanupRateLimits(db: RateLimitDatabase, now = Date.now(), logger?: Logger) {

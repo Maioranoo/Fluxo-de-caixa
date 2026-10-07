@@ -3,11 +3,12 @@ import { env } from "cloudflare:workers";
 import { eq, isNull, or } from "drizzle-orm";
 import { getDb } from ".";
 import { categories, expenses, householdMembers, households, paymentMethods } from "./schema";
-import { normalizeEmail, parsePositiveSafeInteger } from "../app/lib/validation";
+import { parsePositiveSafeInteger } from "../app/lib/validation";
 import { AccessError } from "../app/lib/server/http-security.ts";
 import { getObservabilityConfig } from "../app/lib/server/observability/config.ts";
 import { createLogger } from "../app/lib/server/observability/logger.ts";
 import { createRequestContext } from "../app/lib/server/observability/request-context.ts";
+import { resolveTrustedIdentity } from "../app/lib/server/trusted-identity.ts";
 export { AccessError } from "../app/lib/server/http-security.ts";
 
 type RuntimeConfig = {
@@ -18,6 +19,7 @@ type RuntimeConfig = {
   NODE_ENV?: string;
   LOG_LEVEL?: string;
   SLOW_AUTH_MS?: string;
+  SITE_HOST?: string;
 };
 
 export type HouseholdContext = {
@@ -50,11 +52,7 @@ export async function requireHousehold(request: Request): Promise<HouseholdConte
 
 async function resolveHousehold(request: Request): Promise<HouseholdContext> {
   const config = env as unknown as RuntimeConfig;
-  const hostname = new URL(request.url).hostname;
-  const local = config.LOCAL_ADMIN_ENABLED === "true" && (hostname === "localhost" || hostname === "127.0.0.1");
-  const email = request.headers.get("oai-authenticated-user-email")?.trim().toLowerCase() || (local ? "admin-local@localhost" : undefined);
-  const userId = request.headers.get("oai-authenticated-user-id")?.trim() || (local ? "admin-local" : undefined);
-  if (!email || !userId || !normalizeEmail(email) || userId.length > 256) throw new AccessError("Faça login para acessar esta carteira.", 401);
+  const { email, userId, local } = resolveTrustedIdentity(request, config);
   const householdHeader = request.headers.get("x-household-id");
   if (householdHeader !== null && !parsePositiveSafeInteger(householdHeader)) throw new AccessError("Família inválida.", 400);
 
